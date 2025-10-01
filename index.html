@@ -40,6 +40,7 @@
       const [tempCategoryName, setTempCategoryName] = useState('');
 
       const [newBill, setNewBill] = useState({
+        type: 'bill',
         vendor: '',
         category: 'personal',
         email: '',
@@ -49,7 +50,11 @@
         amount: '',
         frequency: 'monthly',
         isRecurring: true,
-        notes: ''
+        notes: '',
+        balance: '',
+        interestRate: '',
+        term: '',
+        accountType: 'loan'
       });
 
       const formatDate = (dateString) => {
@@ -174,7 +179,11 @@
       };
 
       const addBill = () => {
-        if (newBill.vendor && newBill.amount && newBill.dueDate) {
+        const isValid = newBill.type === 'bill' 
+          ? (newBill.vendor && newBill.amount && newBill.dueDate)
+          : (newBill.vendor && newBill.balance);
+          
+        if (isValid) {
           const bill = {
             ...newBill,
             id: Date.now(),
@@ -183,6 +192,7 @@
           };
           setBills([...bills, bill]);
           setNewBill({
+            type: 'bill',
             vendor: '',
             category: 'personal',
             email: '',
@@ -192,7 +202,11 @@
             amount: '',
             frequency: 'monthly',
             isRecurring: true,
-            notes: ''
+            notes: '',
+            balance: '',
+            interestRate: '',
+            term: '',
+            accountType: 'loan'
           });
           setShowAddBill(false);
         }
@@ -201,28 +215,38 @@
       const startEditingBill = (bill) => {
         setEditingBill(bill);
         setNewBill({
+          type: bill.type || 'bill',
           vendor: bill.vendor,
           category: bill.category,
           email: bill.email || '',
           username: bill.username || '',
           password: bill.password || '',
-          dueDate: bill.dueDate,
-          amount: bill.amount,
-          frequency: bill.frequency,
+          dueDate: bill.dueDate || '',
+          amount: bill.amount || '',
+          frequency: bill.frequency || 'monthly',
           isRecurring: bill.isRecurring !== false,
-          notes: bill.notes || ''
+          notes: bill.notes || '',
+          balance: bill.balance || '',
+          interestRate: bill.interestRate || '',
+          term: bill.term || '',
+          accountType: bill.accountType || 'loan'
         });
         setShowAddBill(true);
       };
 
       const updateBill = () => {
-        if (newBill.vendor && newBill.amount && newBill.dueDate) {
+        const isValid = newBill.type === 'bill' 
+          ? (newBill.vendor && newBill.amount && newBill.dueDate)
+          : (newBill.vendor && newBill.balance);
+          
+        if (isValid) {
           setBills(bills.map(bill => 
             bill.id === editingBill.id 
               ? { ...bill, ...newBill }
               : bill
           ));
           setNewBill({
+            type: 'bill',
             vendor: '',
             category: 'personal',
             email: '',
@@ -232,7 +256,11 @@
             amount: '',
             frequency: 'monthly',
             isRecurring: true,
-            notes: ''
+            notes: '',
+            balance: '',
+            interestRate: '',
+            term: '',
+            accountType: 'loan'
           });
           setEditingBill(null);
           setShowAddBill(false);
@@ -242,6 +270,7 @@
       const cancelEdit = () => {
         setEditingBill(null);
         setNewBill({
+          type: 'bill',
           vendor: '',
           category: 'personal',
           email: '',
@@ -251,7 +280,11 @@
           amount: '',
           frequency: 'monthly',
           isRecurring: true,
-          notes: ''
+          notes: '',
+          balance: '',
+          interestRate: '',
+          term: '',
+          accountType: 'loan'
         });
         setShowAddBill(false);
       };
@@ -299,7 +332,7 @@
       };
 
       const deleteBill = (id) => {
-        if (confirm('Are you sure you want to delete this bill?')) {
+        if (confirm('Are you sure you want to delete this item?')) {
           setBills(bills.filter(bill => bill.id !== id));
         }
       };
@@ -337,8 +370,12 @@
       });
 
       const totalDue = filteredBills
-        .filter(bill => !bill.paid)
+        .filter(bill => bill.type !== 'account' && !bill.paid)
         .reduce((sum, bill) => sum + parseFloat(bill.amount || 0), 0);
+      
+      const totalBalance = filteredBills
+        .filter(bill => bill.type === 'account')
+        .reduce((sum, bill) => sum + parseFloat(bill.balance || 0), 0);
 
       const categories = ['all', 'personal', 'business1', 'business2', 'business3'];
 
@@ -434,7 +471,7 @@
           </header>
 
           <main className="max-w-7xl mx-auto p-4 md:p-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
               <div className="bg-white rounded-xl shadow p-6 border-l-4 border-indigo-500">
                 <div className="flex items-center justify-between">
                   <div>
@@ -444,12 +481,21 @@
                   <span className="text-3xl">📈</span>
                 </div>
               </div>
+              <div className="bg-white rounded-xl shadow p-6 border-l-4 border-teal-500">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-gray-600 text-sm font-medium">Total Balance</p>
+                    <p className="text-3xl font-bold text-gray-800">${totalBalance.toFixed(2)}</p>
+                  </div>
+                  <span className="text-3xl">💰</span>
+                </div>
+              </div>
               <div className="bg-white rounded-xl shadow p-6 border-l-4 border-yellow-500">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-gray-600 text-sm font-medium">Upcoming Bills</p>
                     <p className="text-3xl font-bold text-gray-800">
-                      {bills.filter(b => !b.paid).length}
+                      {bills.filter(b => b.type !== 'account' && !b.paid).length}
                     </p>
                   </div>
                   <span className="text-3xl">📅</span>
@@ -458,12 +504,12 @@
               <div className="bg-white rounded-xl shadow p-6 border-l-4 border-green-500">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-gray-600 text-sm font-medium">Paid This Month</p>
+                    <p className="text-gray-600 text-sm font-medium">Accounts</p>
                     <p className="text-3xl font-bold text-gray-800">
-                      {bills.filter(b => b.paid).length}
+                      {bills.filter(b => b.type === 'account').length}
                     </p>
                   </div>
-                  <span className="text-3xl">✅</span>
+                  <span className="text-3xl">🏦</span>
                 </div>
               </div>
             </div>
@@ -495,7 +541,7 @@
                   className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition flex items-center gap-2"
                 >
                   <span>➕</span>
-                  Add Bill
+                  Add New
                 </button>
               </div>
 
@@ -521,11 +567,11 @@
                 <table className="w-full">
                   <thead className="bg-gray-50 border-b">
                     <tr>
+                      <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Type</th>
                       <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Status</th>
-                      <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Vendor</th>
+                      <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Vendor/Account</th>
                       <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Category</th>
-                      <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Due Date</th>
-                      <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Amount</th>
+                      <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Details</th>
                       <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Credentials</th>
                       <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Actions</th>
                     </tr>
@@ -534,23 +580,36 @@
                     {filteredBills.length === 0 ? (
                       <tr>
                         <td colSpan="7" className="px-4 py-8 text-center text-gray-500">
-                          No bills found. Add your first bill to get started!
+                          No items found. Add your first bill or account to get started!
                         </td>
                       </tr>
                     ) : (
                       filteredBills.map(bill => {
                         const status = calculateStatus(bill.dueDate, bill.paid);
+                        const isBill = bill.type !== 'account';
                         return (
                           <tr key={bill.id} className="hover:bg-gray-50">
                             <td className="px-4 py-4">
-                              <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(status)}`}>
-                                {status === 'due-soon' ? 'Due Soon' : status.charAt(0).toUpperCase() + status.slice(1)}
+                              <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                                isBill ? 'bg-purple-100 text-purple-700' : 'bg-teal-100 text-teal-700'
+                              }`}>
+                                {isBill ? '📄 Bill' : '💰 Account'}
                               </span>
+                            </td>
+                            <td className="px-4 py-4">
+                              {isBill && (
+                                <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(status)}`}>
+                                  {status === 'due-soon' ? 'Due Soon' : status.charAt(0).toUpperCase() + status.slice(1)}
+                                </span>
+                              )}
                             </td>
                             <td className="px-4 py-4">
                               <div className="font-medium text-gray-800">{bill.vendor}</div>
                               {bill.notes && <div className="text-sm text-gray-500">{bill.notes}</div>}
-                              {bill.isRecurring && <div className="text-xs text-indigo-600 mt-1">🔄 Recurring</div>}
+                              {bill.isRecurring && isBill && <div className="text-xs text-indigo-600 mt-1">🔄 Recurring</div>}
+                              {!isBill && bill.accountType && (
+                                <div className="text-xs text-gray-600 mt-1 capitalize">{bill.accountType}</div>
+                              )}
                             </td>
                             <td className="px-4 py-4">
                               <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 rounded text-sm">
@@ -558,11 +617,34 @@
                                 {categoryNames[bill.category]}
                               </span>
                             </td>
-                            <td className="px-4 py-4 text-gray-700">
-                              {formatDate(bill.dueDate)}
-                            </td>
                             <td className="px-4 py-4">
-                              <span className="font-semibold text-gray-800">${parseFloat(bill.amount).toFixed(2)}</span>
+                              {isBill ? (
+                                <div>
+                                  <div className="text-sm text-gray-600">Due: {formatDate(bill.dueDate)}</div>
+                                  <div className="font-semibold text-gray-800">${parseFloat(bill.amount).toFixed(2)}</div>
+                                </div>
+                              ) : (
+                                <div className="space-y-1">
+                                  <div className="font-semibold text-gray-800">
+                                    Balance: ${parseFloat(bill.balance || 0).toFixed(2)}
+                                  </div>
+                                  {bill.interestRate && (
+                                    <div className="text-sm text-gray-600">
+                                      Interest: {bill.interestRate}%
+                                    </div>
+                                  )}
+                                  {bill.term && (
+                                    <div className="text-sm text-gray-600">
+                                      Term: {bill.term} months
+                                    </div>
+                                  )}
+                                  {bill.dueDate && bill.amount && (
+                                    <div className="text-sm text-gray-600">
+                                      Payment: ${parseFloat(bill.amount).toFixed(2)} on {formatDate(bill.dueDate)}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </td>
                             <td className="px-4 py-4">
                               <div className="space-y-1 text-sm">
@@ -588,25 +670,27 @@
                                 <button
                                   onClick={() => startEditingBill(bill)}
                                   className="p-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition"
-                                  title="Edit bill"
+                                  title="Edit"
                                 >
                                   ✏️
                                 </button>
-                                <button
-                                  onClick={() => togglePaid(bill.id)}
-                                  className={`p-2 rounded-lg transition ${
-                                    bill.paid 
-                                      ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' 
-                                      : 'bg-green-100 text-green-700 hover:bg-green-200'
-                                  }`}
-                                  title={bill.paid ? 'Mark as unpaid' : 'Mark as paid'}
-                                >
-                                  ✓
-                                </button>
+                                {isBill && (
+                                  <button
+                                    onClick={() => togglePaid(bill.id)}
+                                    className={`p-2 rounded-lg transition ${
+                                      bill.paid 
+                                        ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' 
+                                        : 'bg-green-100 text-green-700 hover:bg-green-200'
+                                    }`}
+                                    title={bill.paid ? 'Mark as unpaid' : 'Mark as paid'}
+                                  >
+                                    ✓
+                                  </button>
+                                )}
                                 <button
                                   onClick={() => deleteBill(bill.id)}
                                   className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition"
-                                  title="Delete bill"
+                                  title="Delete"
                                 >
                                   🗑️
                                 </button>
@@ -713,7 +797,10 @@
               <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
                 <div className="p-6 border-b flex justify-between items-center">
                   <h2 className="text-2xl font-bold text-gray-800">
-                    {editingBill ? 'Edit Bill' : 'Add New Bill'}
+                    {editingBill 
+                      ? `Edit ${editingBill.type === 'account' ? 'Account' : 'Bill'}` 
+                      : `Add New ${newBill.type === 'account' ? 'Account' : 'Bill'}`
+                    }
                   </h2>
                   <button
                     onClick={cancelEdit}
@@ -723,15 +810,43 @@
                   </button>
                 </div>
                 <div className="p-6 space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Type *</label>
+                    <div className="flex gap-4">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          value="bill"
+                          checked={newBill.type === 'bill'}
+                          onChange={(e) => setNewBill({...newBill, type: e.target.value})}
+                          className="w-4 h-4 text-indigo-600"
+                        />
+                        <span className="text-sm font-medium text-gray-700">📄 Bill (scheduled payment)</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          value="account"
+                          checked={newBill.type === 'account'}
+                          onChange={(e) => setNewBill({...newBill, type: e.target.value})}
+                          className="w-4 h-4 text-indigo-600"
+                        />
+                        <span className="text-sm font-medium text-gray-700">💰 Account (balance tracking)</span>
+                      </label>
+                    </div>
+                  </div>
+                  
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Vendor/Service *</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        {newBill.type === 'bill' ? 'Vendor/Service' : 'Account Name'} *
+                      </label>
                       <input
                         type="text"
                         value={newBill.vendor}
                         onChange={(e) => setNewBill({...newBill, vendor: e.target.value})}
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                        placeholder="Netflix, Electric Company, etc."
+                        placeholder={newBill.type === 'bill' ? 'Netflix, Electric Company, etc.' : 'Mortgage, Credit Card, etc.'}
                       />
                     </div>
                     <div>
@@ -747,26 +862,120 @@
                         <option value="business3">{categoryNames.business3}</option>
                       </select>
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Amount *</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={newBill.amount}
-                        onChange={(e) => setNewBill({...newBill, amount: e.target.value})}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                        placeholder="0.00"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Due Date (M/D/Y) *</label>
-                      <input
-                        type="date"
-                        value={newBill.dueDate}
-                        onChange={(e) => setNewBill({...newBill, dueDate: e.target.value})}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                      />
-                    </div>
+                    
+                    {newBill.type === 'account' && (
+                      <>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Account Type</label>
+                          <select
+                            value={newBill.accountType}
+                            onChange={(e) => setNewBill({...newBill, accountType: e.target.value})}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                          >
+                            <option value="loan">Loan</option>
+                            <option value="mortgage">Mortgage</option>
+                            <option value="credit-card">Credit Card</option>
+                            <option value="savings">Savings Account</option>
+                            <option value="investment">Investment Account</option>
+                            <option value="other">Other</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Current Balance *</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={newBill.balance}
+                            onChange={(e) => setNewBill({...newBill, balance: e.target.value})}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Interest Rate (%)</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={newBill.interestRate}
+                            onChange={(e) => setNewBill({...newBill, interestRate: e.target.value})}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                            placeholder="5.5"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Term (months)</label>
+                          <input
+                            type="number"
+                            value={newBill.term}
+                            onChange={(e) => setNewBill({...newBill, term: e.target.value})}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                            placeholder="360"
+                          />
+                        </div>
+                      </>
+                    )}
+                    
+                    {newBill.type === 'bill' ? (
+                      <>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Amount *</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={newBill.amount}
+                            onChange={(e) => setNewBill({...newBill, amount: e.target.value})}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Due Date *</label>
+                          <input
+                            type="date"
+                            value={newBill.dueDate}
+                            onChange={(e) => setNewBill({...newBill, dueDate: e.target.value})}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Frequency</label>
+                          <select
+                            value={newBill.frequency}
+                            onChange={(e) => setNewBill({...newBill, frequency: e.target.value})}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                          >
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                            <option value="quarterly">Quarterly</option>
+                            <option value="yearly">Yearly</option>
+                          </select>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Payment Amount (optional)</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={newBill.amount}
+                            onChange={(e) => setNewBill({...newBill, amount: e.target.value})}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Payment Due Date (optional)</label>
+                          <input
+                            type="date"
+                            value={newBill.dueDate}
+                            onChange={(e) => setNewBill({...newBill, dueDate: e.target.value})}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                          />
+                        </div>
+                      </>
+                    )}
+                    
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
                       <input
@@ -797,33 +1006,24 @@
                         placeholder="account password"
                       />
                     </div>
+                  </div>
+                  
+                  {newBill.type === 'bill' && (
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Frequency</label>
-                      <select
-                        value={newBill.frequency}
-                        onChange={(e) => setNewBill({...newBill, frequency: e.target.value})}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                      >
-                        <option value="weekly">Weekly</option>
-                        <option value="monthly">Monthly</option>
-                        <option value="quarterly">Quarterly</option>
-                        <option value="yearly">Yearly</option>
-                      </select>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={newBill.isRecurring}
+                          onChange={(e) => setNewBill({...newBill, isRecurring: e.target.checked})}
+                          className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                        />
+                        <span className="text-sm font-medium text-gray-700">
+                          Recurring Bill (automatically create next bill when marked as paid)
+                        </span>
+                      </label>
                     </div>
-                  </div>
-                  <div>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={newBill.isRecurring}
-                        onChange={(e) => setNewBill({...newBill, isRecurring: e.target.checked})}
-                        className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-                      />
-                      <span className="text-sm font-medium text-gray-700">
-                        Recurring Bill (automatically create next bill when marked as paid)
-                      </span>
-                    </label>
-                  </div>
+                  )}
+                  
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
                     <textarea
@@ -831,7 +1031,7 @@
                       onChange={(e) => setNewBill({...newBill, notes: e.target.value})}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                       rows="3"
-                      placeholder="Additional notes about this bill..."
+                      placeholder="Additional notes..."
                     />
                   </div>
                 </div>
@@ -846,7 +1046,10 @@
                     onClick={editingBill ? updateBill : addBill}
                     className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
                   >
-                    {editingBill ? 'Update Bill' : 'Add Bill'}
+                    {editingBill 
+                      ? `Update ${editingBill.type === 'account' ? 'Account' : 'Bill'}` 
+                      : `Add ${newBill.type === 'account' ? 'Account' : 'Bill'}`
+                    }
                   </button>
                 </div>
               </div>
