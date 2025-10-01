@@ -38,6 +38,11 @@
       
       const [editingCategory, setEditingCategory] = useState(null);
       const [tempCategoryName, setTempCategoryName] = useState('');
+      const [showBalanceUpdate, setShowBalanceUpdate] = useState(false);
+      const [balanceUpdateId, setBalanceUpdateId] = useState(null);
+      const [newBalance, setNewBalance] = useState('');
+      const [showHistory, setShowHistory] = useState(false);
+      const [historyBill, setHistoryBill] = useState(null);
 
       const [newBill, setNewBill] = useState({
         type: 'bill',
@@ -291,6 +296,7 @@
 
       const togglePaid = (id) => {
         const bill = bills.find(b => b.id === id);
+        const isAccount = bill.type === 'account';
         
         if (!bill.paid && bill.isRecurring) {
           const nextBill = {
@@ -301,6 +307,11 @@
             history: []
           };
           
+          // If it's an account with a balance, reduce the balance by the payment amount
+          if (isAccount && bill.balance && bill.amount) {
+            nextBill.balance = (parseFloat(bill.balance) - parseFloat(bill.amount)).toFixed(2);
+          }
+          
           setBills(bills.map(b => {
             if (b.id === id) {
               return {
@@ -308,7 +319,12 @@
                 paid: true,
                 history: [...(b.history || []), {
                   date: new Date().toISOString(),
-                  amount: b.amount
+                  amount: b.amount,
+                  type: 'payment',
+                  previousBalance: isAccount ? b.balance : null,
+                  newBalance: isAccount && b.balance && b.amount 
+                    ? (parseFloat(b.balance) - parseFloat(b.amount)).toFixed(2) 
+                    : null
                 }]
               };
             }
@@ -319,9 +335,15 @@
             if (bill.id === id) {
               const updatedBill = { ...bill, paid: !bill.paid };
               if (!bill.paid) {
+                const isAcct = bill.type === 'account';
                 updatedBill.history = [...(bill.history || []), {
                   date: new Date().toISOString(),
-                  amount: bill.amount
+                  amount: bill.amount,
+                  type: 'payment',
+                  previousBalance: isAcct ? bill.balance : null,
+                  newBalance: isAcct && bill.balance && bill.amount 
+                    ? (parseFloat(bill.balance) - parseFloat(bill.amount)).toFixed(2) 
+                    : null
                 }];
               }
               return updatedBill;
@@ -337,11 +359,48 @@
         }
       };
 
+      const openBalanceUpdate = (id) => {
+        const bill = bills.find(b => b.id === id);
+        setBalanceUpdateId(id);
+        setNewBalance(bill.balance || '');
+        setShowBalanceUpdate(true);
+      };
+
+      const updateBalance = () => {
+        if (newBalance && balanceUpdateId) {
+          setBills(bills.map(bill => {
+            if (bill.id === balanceUpdateId) {
+              return {
+                ...bill,
+                balance: newBalance,
+                history: [...(bill.history || []), {
+                  date: new Date().toISOString(),
+                  amount: null,
+                  type: 'balance_update',
+                  previousBalance: bill.balance,
+                  newBalance: newBalance
+                }]
+              };
+            }
+            return bill;
+          }));
+          setShowBalanceUpdate(false);
+          setBalanceUpdateId(null);
+          setNewBalance('');
+        }
+      };
+
+      const openHistory = (bill) => {
+        setHistoryBill(bill);
+        setShowHistory(true);
+      };
+
       const togglePasswordVisibility = (id) => {
         setShowPasswords(prev => ({ ...prev, [id]: !prev[id] }));
       };
 
       const calculateStatus = (dueDate, paid) => {
+        if (!dueDate) return null;
         if (paid) return 'paid';
         const today = new Date();
         const parts = dueDate.split('-');
@@ -597,7 +656,7 @@
                               </span>
                             </td>
                             <td className="px-4 py-4">
-                              {isBill && (
+                              {(isBill || bill.dueDate) && (
                                 <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(status)}`}>
                                   {status === 'due-soon' ? 'Due Soon' : status.charAt(0).toUpperCase() + status.slice(1)}
                                 </span>
@@ -607,6 +666,9 @@
                               <div className="font-medium text-gray-800">{bill.vendor}</div>
                               {bill.notes && <div className="text-sm text-gray-500">{bill.notes}</div>}
                               {bill.isRecurring && isBill && <div className="text-xs text-indigo-600 mt-1">🔄 Recurring</div>}
+                              {bill.isRecurring && !isBill && bill.amount && bill.dueDate && (
+                                <div className="text-xs text-indigo-600 mt-1">🔄 Recurring Payment</div>
+                              )}
                               {!isBill && bill.accountType && (
                                 <div className="text-xs text-gray-600 mt-1 capitalize">{bill.accountType}</div>
                               )}
@@ -674,7 +736,25 @@
                                 >
                                   ✏️
                                 </button>
-                                {isBill && (
+                                {!isBill && (
+                                  <button
+                                    onClick={() => openBalanceUpdate(bill.id)}
+                                    className="p-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition"
+                                    title="Update balance"
+                                  >
+                                    💰
+                                  </button>
+                                )}
+                                {(bill.history && bill.history.length > 0) && (
+                                  <button
+                                    onClick={() => openHistory(bill)}
+                                    className="p-2 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 transition"
+                                    title="View history"
+                                  >
+                                    📜
+                                  </button>
+                                )}
+                                {(isBill || (bill.amount && bill.dueDate)) && (
                                   <button
                                     onClick={() => togglePaid(bill.id)}
                                     className={`p-2 rounded-lg transition ${
@@ -973,6 +1053,19 @@
                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                           />
                         </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Payment Frequency</label>
+                          <select
+                            value={newBill.frequency}
+                            onChange={(e) => setNewBill({...newBill, frequency: e.target.value})}
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                          >
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                            <option value="quarterly">Quarterly</option>
+                            <option value="yearly">Yearly</option>
+                          </select>
+                        </div>
                       </>
                     )}
                     
@@ -1024,6 +1117,22 @@
                     </div>
                   )}
                   
+                  {newBill.type === 'account' && newBill.amount && newBill.dueDate && (
+                    <div>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={newBill.isRecurring}
+                          onChange={(e) => setNewBill({...newBill, isRecurring: e.target.checked})}
+                          className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                        />
+                        <span className="text-sm font-medium text-gray-700">
+                          Recurring Payment (automatically create next payment & reduce balance when marked as paid)
+                        </span>
+                      </label>
+                    </div>
+                  )}
+                  
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
                     <textarea
@@ -1050,6 +1159,134 @@
                       ? `Update ${editingBill.type === 'account' ? 'Account' : 'Bill'}` 
                       : `Add ${newBill.type === 'account' ? 'Account' : 'Bill'}`
                     }
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showBalanceUpdate && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
+                <div className="p-6 border-b">
+                  <h2 className="text-2xl font-bold text-gray-800">Update Balance</h2>
+                  <p className="text-sm text-gray-600 mt-2">Enter the new balance for this account</p>
+                </div>
+                <div className="p-6">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">New Balance *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={newBalance}
+                    onChange={(e) => setNewBalance(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    placeholder="0.00"
+                    autoFocus
+                  />
+                </div>
+                <div className="p-6 border-t flex gap-3 justify-end">
+                  <button
+                    onClick={() => {
+                      setShowBalanceUpdate(false);
+                      setBalanceUpdateId(null);
+                      setNewBalance('');
+                    }}
+                    className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={updateBalance}
+                    className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
+                  >
+                    Update Balance
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showHistory && historyBill && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
+                <div className="p-6 border-b">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h2 className="text-2xl font-bold text-gray-800">Payment History</h2>
+                      <p className="text-sm text-gray-600 mt-1">{historyBill.vendor}</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setShowHistory(false);
+                        setHistoryBill(null);
+                      }}
+                      className="p-2 hover:bg-gray-100 rounded-lg transition text-2xl"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+                <div className="flex-1 overflow-y-auto p-6">
+                  {(!historyBill.history || historyBill.history.length === 0) ? (
+                    <div className="text-center py-8 text-gray-500">
+                      No payment history yet
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {[...historyBill.history].reverse().map((entry, idx) => {
+                        const date = new Date(entry.date);
+                        const isPayment = entry.type === 'payment';
+                        return (
+                          <div key={idx} className={`p-4 rounded-lg border-l-4 ${
+                            isPayment ? 'bg-green-50 border-green-500' : 'bg-blue-50 border-blue-500'
+                          }`}>
+                            <div className="flex justify-between items-start mb-2">
+                              <div className="flex items-center gap-2">
+                                <span className="text-2xl">{isPayment ? '💳' : '📊'}</span>
+                                <div>
+                                  <div className="font-semibold text-gray-800">
+                                    {isPayment ? 'Payment Made' : 'Balance Updated'}
+                                  </div>
+                                  <div className="text-sm text-gray-600">
+                                    {date.toLocaleDateString()} at {date.toLocaleTimeString()}
+                                  </div>
+                                </div>
+                              </div>
+                              {entry.amount && (
+                                <div className="text-right">
+                                  <div className="font-bold text-green-700">
+                                    -${parseFloat(entry.amount).toFixed(2)}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            {entry.previousBalance && entry.newBalance && (
+                              <div className="flex items-center gap-2 text-sm mt-2 pt-2 border-t border-gray-200">
+                                <span className="text-gray-600">Balance:</span>
+                                <span className="font-medium text-gray-700">
+                                  ${parseFloat(entry.previousBalance).toFixed(2)}
+                                </span>
+                                <span className="text-gray-400">→</span>
+                                <span className="font-bold text-gray-800">
+                                  ${parseFloat(entry.newBalance).toFixed(2)}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                <div className="p-6 border-t">
+                  <button
+                    onClick={() => {
+                      setShowHistory(false);
+                      setHistoryBill(null);
+                    }}
+                    className="w-full px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
+                  >
+                    Close
                   </button>
                 </div>
               </div>
