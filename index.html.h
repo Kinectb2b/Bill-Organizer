@@ -29,6 +29,8 @@
     const User = (props) => <i data-lucide="user" {...props}></i>;
     const TrendingUp = (props) => <i data-lucide="trending-up" {...props}></i>;
     const AlertCircle = (props) => <i data-lucide="alert-circle" {...props}></i>;
+    const Edit2 = (props) => <i data-lucide="edit-2" {...props}></i>;
+    const Settings = (props) => <i data-lucide="settings" {...props}></i>;
 
     const BillTracker = () => {
       const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -41,6 +43,18 @@
       const [selectedCategory, setSelectedCategory] = useState('all');
       const [showPasswords, setShowPasswords] = useState({});
       const [view, setView] = useState('upcoming');
+      const [showSettings, setShowSettings] = useState(false);
+      
+      // Category names with defaults
+      const [categoryNames, setCategoryNames] = useState({
+        personal: 'Personal',
+        business1: 'Business 1',
+        business2: 'Business 2',
+        business3: 'Business 3'
+      });
+      
+      const [editingCategory, setEditingCategory] = useState(null);
+      const [tempCategoryName, setTempCategoryName] = useState('');
 
       const [newBill, setNewBill] = useState({
         vendor: '',
@@ -54,19 +68,28 @@
         notes: ''
       });
 
+      // Format date as M/D/Y
+      const formatDate = (dateString) => {
+        const date = new Date(dateString);
+        const month = date.getMonth() + 1;
+        const day = date.getDate();
+        const year = date.getFullYear();
+        return `${month}/${day}/${year}`;
+      };
+
       useEffect(() => {
         const savedBills = localStorage.getItem('bills');
         const savedCreds = localStorage.getItem('userCredentials');
         const activeSession = localStorage.getItem('activeSession');
+        const savedCategoryNames = localStorage.getItem('categoryNames');
         
         if (savedBills) setBills(JSON.parse(savedBills));
+        if (savedCategoryNames) setCategoryNames(JSON.parse(savedCategoryNames));
         
-        // Check if this is first time user
         if (!savedCreds) {
           setIsFirstTime(true);
         }
         
-        // Check if there's an active session
         if (activeSession === 'true' && savedCreds) {
           const creds = JSON.parse(savedCreds);
           setUsername(creds.username);
@@ -79,6 +102,10 @@
           localStorage.setItem('bills', JSON.stringify(bills));
         }
       }, [bills]);
+
+      useEffect(() => {
+        localStorage.setItem('categoryNames', JSON.stringify(categoryNames));
+      }, [categoryNames]);
 
       useEffect(() => {
         lucide.createIcons();
@@ -95,7 +122,6 @@
         const savedCreds = localStorage.getItem('userCredentials');
 
         if (isFirstTime || !savedCreds) {
-          // First time - create account
           const credentials = {
             username: username,
             password: password
@@ -105,7 +131,6 @@
           setIsLoggedIn(true);
           setIsFirstTime(false);
         } else {
-          // Verify credentials
           const creds = JSON.parse(savedCreds);
           if (creds.username === username && creds.password === password) {
             localStorage.setItem('activeSession', 'true');
@@ -122,6 +147,27 @@
         setUsername('');
         setPassword('');
         localStorage.setItem('activeSession', 'false');
+      };
+
+      const startEditingCategory = (categoryKey) => {
+        setEditingCategory(categoryKey);
+        setTempCategoryName(categoryNames[categoryKey]);
+      };
+
+      const saveCategoryName = () => {
+        if (tempCategoryName.trim() && editingCategory) {
+          setCategoryNames({
+            ...categoryNames,
+            [editingCategory]: tempCategoryName.trim()
+          });
+          setEditingCategory(null);
+          setTempCategoryName('');
+        }
+      };
+
+      const cancelEditingCategory = () => {
+        setEditingCategory(null);
+        setTempCategoryName('');
       };
 
       const addBill = () => {
@@ -278,12 +324,21 @@
                   <p className="text-sm text-gray-600">Welcome, {username}</p>
                 </div>
               </div>
-              <button
-                onClick={handleLogout}
-                className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition"
-              >
-                Logout
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowSettings(true)}
+                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition flex items-center gap-2"
+                >
+                  <Settings size={18} />
+                  Settings
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition"
+                >
+                  Logout
+                </button>
+              </div>
             </div>
           </header>
 
@@ -365,7 +420,7 @@
                           : 'bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200'
                       }`}
                     >
-                      {cat === 'all' ? 'All' : cat}
+                      {cat === 'all' ? 'All' : categoryNames[cat]}
                     </button>
                   ))}
                 </div>
@@ -406,13 +461,13 @@
                               {bill.notes && <div className="text-sm text-gray-500">{bill.notes}</div>}
                             </td>
                             <td className="px-4 py-4">
-                              <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 rounded text-sm capitalize">
+                              <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 rounded text-sm">
                                 {bill.category === 'personal' ? <User size={14} /> : <Building2 size={14} />}
-                                {bill.category}
+                                {categoryNames[bill.category]}
                               </span>
                             </td>
                             <td className="px-4 py-4 text-gray-700">
-                              {new Date(bill.dueDate).toLocaleDateString()}
+                              {formatDate(bill.dueDate)}
                             </td>
                             <td className="px-4 py-4">
                               <span className="font-semibold text-gray-800">${parseFloat(bill.amount).toFixed(2)}</span>
@@ -468,6 +523,84 @@
             </div>
           </main>
 
+          {/* Settings Modal */}
+          {showSettings && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full">
+                <div className="p-6 border-b flex justify-between items-center">
+                  <h2 className="text-2xl font-bold text-gray-800">Settings</h2>
+                  <button
+                    onClick={() => setShowSettings(false)}
+                    className="p-2 hover:bg-gray-100 rounded-lg transition"
+                  >
+                    <X size={24} />
+                  </button>
+                </div>
+                <div className="p-6">
+                  <h3 className="text-lg font-semibold text-gray-800 mb-4">Category Names</h3>
+                  <p className="text-sm text-gray-600 mb-4">Click the edit icon to rename your categories</p>
+                  <div className="space-y-3">
+                    {Object.keys(categoryNames).map(catKey => (
+                      <div key={catKey} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                        <div className="flex-1">
+                          {editingCategory === catKey ? (
+                            <input
+                              type="text"
+                              value={tempCategoryName}
+                              onChange={(e) => setTempCategoryName(e.target.value)}
+                              onKeyPress={(e) => e.key === 'Enter' && saveCategoryName()}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                              autoFocus
+                            />
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              {catKey === 'personal' ? <User size={18} className="text-gray-600" /> : <Building2 size={18} className="text-gray-600" />}
+                              <span className="font-medium text-gray-800">{categoryNames[catKey]}</span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          {editingCategory === catKey ? (
+                            <>
+                              <button
+                                onClick={saveCategoryName}
+                                className="p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition"
+                              >
+                                <Check size={18} />
+                              </button>
+                              <button
+                                onClick={cancelEditingCategory}
+                                className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition"
+                              >
+                                <X size={18} />
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              onClick={() => startEditingCategory(catKey)}
+                              className="p-2 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition"
+                            >
+                              <Edit2 size={18} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="p-6 border-t flex justify-end">
+                  <button
+                    onClick={() => setShowSettings(false)}
+                    className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Add Bill Modal */}
           {showAddBill && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
               <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -499,10 +632,10 @@
                         onChange={(e) => setNewBill({...newBill, category: e.target.value})}
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                       >
-                        <option value="personal">Personal</option>
-                        <option value="business1">Business 1</option>
-                        <option value="business2">Business 2</option>
-                        <option value="business3">Business 3</option>
+                        <option value="personal">{categoryNames.personal}</option>
+                        <option value="business1">{categoryNames.business1}</option>
+                        <option value="business2">{categoryNames.business2}</option>
+                        <option value="business3">{categoryNames.business3}</option>
                       </select>
                     </div>
                     <div>
@@ -517,7 +650,7 @@
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Due Date *</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Due Date (M/D/Y) *</label>
                       <input
                         type="date"
                         value={newBill.dueDate}
