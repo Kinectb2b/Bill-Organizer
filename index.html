@@ -62,9 +62,9 @@
         type: 'bill',
         vendor: '',
         category: 'personal',
-        email: '',
-        username: '',
-        password: '',
+        accountEmail: '',
+        accountUsername: '',
+        accountPassword: '',
         dueDate: '',
         amount: '',
         frequency: 'monthly',
@@ -116,28 +116,21 @@
             .from('bills')
             .select('*')
             .eq('user_id', userId)
-            .order('due_date', { ascending: true });
+            .order('due_date', { ascending: true, nullsLast: true });
 
           if (billsError) throw billsError;
 
-          const billsWithHistory = await Promise.all(
-            (billsData || []).map(async (bill) => {
-              const { data: historyData } = await supabaseClient
-                .from('bill_history')
-                .select('*')
-                .eq('bill_id', bill.id)
-                .order('date', { ascending: false });
-              
-              return {
-                ...bill,
-                dueDate: bill.due_date,
-                isRecurring: bill.is_recurring,
-                interestRate: bill.interest_rate,
-                accountType: bill.account_type,
-                history: historyData || []
-              };
-            })
-          );
+          const billsWithHistory = (billsData || []).map(bill => ({
+            ...bill,
+            dueDate: bill.due_date,
+            isRecurring: bill.is_recurring,
+            interestRate: bill.interest_rate,
+            accountType: bill.account_type,
+            accountEmail: bill.email,
+            accountUsername: bill.username,
+            accountPassword: bill.password,
+            history: []
+          }));
 
           setBills(billsWithHistory);
 
@@ -222,19 +215,19 @@
             type: bill.type,
             vendor: bill.vendor,
             category: bill.category,
-            email: bill.email,
-            username: bill.username,
-            password: bill.password,
-            due_date: bill.dueDate,
-            amount: bill.amount,
+            email: bill.accountEmail,
+            username: bill.accountUsername,
+            password: bill.accountPassword,
+            due_date: bill.dueDate || null,
+            amount: bill.amount || null,
             frequency: bill.frequency,
             is_recurring: bill.isRecurring,
             notes: bill.notes,
-            balance: bill.balance,
-            interest_rate: bill.interestRate,
-            term: bill.term,
+            balance: bill.balance || null,
+            interest_rate: bill.interestRate || null,
+            term: bill.term || null,
             account_type: bill.accountType,
-            paid: bill.paid,
+            paid: bill.paid || false,
             updated_at: new Date().toISOString()
           };
 
@@ -244,27 +237,10 @@
 
           if (error) throw error;
 
-          if (bill.history && bill.history.length > 0) {
-            const lastHistory = bill.history[bill.history.length - 1];
-            if (!lastHistory.id) {
-              const historyData = {
-                bill_id: bill.id,
-                user_id: user.id,
-                date: lastHistory.date,
-                amount: lastHistory.amount,
-                type: lastHistory.type,
-                previous_balance: lastHistory.previousBalance,
-                new_balance: lastHistory.newBalance
-              };
-
-              await supabaseClient
-                .from('bill_history')
-                .insert(historyData);
-            }
-          }
+          return true;
         } catch (error) {
           console.error('Error saving bill:', error);
-          alert('Error saving bill. Please try again.');
+          return false;
         } finally {
           setSyncing(false);
         }
@@ -357,6 +333,9 @@
                 isRecurring: bill.is_recurring ?? bill.isRecurring,
                 interestRate: bill.interest_rate || bill.interestRate,
                 accountType: bill.account_type || bill.accountType,
+                accountEmail: bill.email || bill.accountEmail,
+                accountUsername: bill.username || bill.accountUsername,
+                accountPassword: bill.password || bill.accountPassword,
                 id: Date.now() + Math.random()
               };
               await saveBillToSupabase(billToSave);
@@ -497,27 +476,29 @@
             history: []
           };
           
-          await saveBillToSupabase(bill);
-          setBills([...bills, bill]);
+          const success = await saveBillToSupabase(bill);
           
-          setNewBill({
-            type: 'bill',
-            vendor: '',
-            category: 'personal',
-            email: '',
-            username: '',
-            password: '',
-            dueDate: '',
-            amount: '',
-            frequency: 'monthly',
-            isRecurring: true,
-            notes: '',
-            balance: '',
-            interestRate: '',
-            term: '',
-            accountType: 'loan'
-          });
-          setShowAddBill(false);
+          if (success) {
+            setBills([...bills, bill]);
+            setNewBill({
+              type: 'bill',
+              vendor: '',
+              category: 'personal',
+              accountEmail: '',
+              accountUsername: '',
+              accountPassword: '',
+              dueDate: '',
+              amount: '',
+              frequency: 'monthly',
+              isRecurring: true,
+              notes: '',
+              balance: '',
+              interestRate: '',
+              term: '',
+              accountType: 'loan'
+            });
+            setShowAddBill(false);
+          }
         }
       };
 
@@ -534,28 +515,30 @@
           );
           
           const updatedBill = updatedBills.find(b => b.id === editingBill.id);
-          await saveBillToSupabase(updatedBill);
-          setBills(updatedBills);
+          const success = await saveBillToSupabase(updatedBill);
           
-          setNewBill({
-            type: 'bill',
-            vendor: '',
-            category: 'personal',
-            email: '',
-            username: '',
-            password: '',
-            dueDate: '',
-            amount: '',
-            frequency: 'monthly',
-            isRecurring: true,
-            notes: '',
-            balance: '',
-            interestRate: '',
-            term: '',
-            accountType: 'loan'
-          });
-          setEditingBill(null);
-          setShowAddBill(false);
+          if (success) {
+            setBills(updatedBills);
+            setNewBill({
+              type: 'bill',
+              vendor: '',
+              category: 'personal',
+              accountEmail: '',
+              accountUsername: '',
+              accountPassword: '',
+              dueDate: '',
+              amount: '',
+              frequency: 'monthly',
+              isRecurring: true,
+              notes: '',
+              balance: '',
+              interestRate: '',
+              term: '',
+              accountType: 'loan'
+            });
+            setEditingBill(null);
+            setShowAddBill(false);
+          }
         }
       };
 
@@ -563,7 +546,7 @@
         const bill = bills.find(b => b.id === id);
         const isAccount = bill.type === 'account';
         
-        if (!bill.paid && bill.isRecurring) {
+        if (!bill.paid && bill.isRecurring && bill.dueDate) {
           const nextBill = {
             ...bill,
             id: Date.now(),
@@ -578,17 +561,12 @@
           
           const updatedCurrentBill = {
             ...bill,
-            paid: true,
-            history: [...(bill.history || []), {
-              date: new Date().toISOString(),
-              amount: bill.amount,
-              type: 'payment',
-              previousBalance: isAccount ? bill.balance : null,
-              newBalance: isAccount && bill.balance && bill.amount 
-                ? (parseFloat(bill.balance) - parseFloat(bill.amount)).toFixed(2) 
-                : null
-            }]
+            paid: true
           };
+          
+          if (isAccount && bill.balance && bill.amount) {
+            updatedCurrentBill.balance = (parseFloat(bill.balance) - parseFloat(bill.amount)).toFixed(2);
+          }
           
           await saveBillToSupabase(updatedCurrentBill);
           await saveBillToSupabase(nextBill);
@@ -597,17 +575,12 @@
         } else {
           const updatedBill = {
             ...bill,
-            paid: !bill.paid,
-            history: !bill.paid ? [...(bill.history || []), {
-              date: new Date().toISOString(),
-              amount: bill.amount,
-              type: 'payment',
-              previousBalance: isAccount ? bill.balance : null,
-              newBalance: isAccount && bill.balance && bill.amount 
-                ? (parseFloat(bill.balance) - parseFloat(bill.amount)).toFixed(2) 
-                : null
-            }] : bill.history
+            paid: !bill.paid
           };
+          
+          if (!bill.paid && isAccount && bill.balance && bill.amount) {
+            updatedBill.balance = (parseFloat(bill.balance) - parseFloat(bill.amount)).toFixed(2);
+          }
           
           await saveBillToSupabase(updatedBill);
           setBills(bills.map(b => b.id === id ? updatedBill : b));
@@ -627,9 +600,9 @@
           type: bill.type || 'bill',
           vendor: bill.vendor,
           category: bill.category,
-          email: bill.email || '',
-          username: bill.username || '',
-          password: bill.password || '',
+          accountEmail: bill.accountEmail || '',
+          accountUsername: bill.accountUsername || '',
+          accountPassword: bill.accountPassword || '',
           dueDate: bill.dueDate || '',
           amount: bill.amount || '',
           frequency: bill.frequency || 'monthly',
@@ -649,9 +622,9 @@
           type: 'bill',
           vendor: '',
           category: 'personal',
-          email: '',
-          username: '',
-          password: '',
+          accountEmail: '',
+          accountUsername: '',
+          accountPassword: '',
           dueDate: '',
           amount: '',
           frequency: 'monthly',
@@ -953,13 +926,14 @@
                       <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Vendor/Account</th>
                       <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Category</th>
                       <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Details</th>
+                      <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Credentials</th>
                       <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
                     {filteredBills.length === 0 ? (
                       <tr>
-                        <td colSpan="6" className="px-4 py-8 text-center text-gray-500">
+                        <td colSpan="7" className="px-4 py-8 text-center text-gray-500">
                           No items found. Add your first bill or account!
                         </td>
                       </tr>
@@ -1003,14 +977,39 @@
                                   <div className="font-semibold text-gray-800">
                                     Balance: ${parseFloat(bill.balance || 0).toFixed(2)}
                                   </div>
+                                  {bill.dueDate && bill.amount && (
+                                    <div className="text-sm text-gray-600">
+                                      Payment: ${parseFloat(bill.amount).toFixed(2)} on {formatDate(bill.dueDate)}
+                                    </div>
+                                  )}
                                 </div>
                               )}
+                            </td>
+                            <td className="px-4 py-4">
+                              <div className="space-y-1 text-sm">
+                                {bill.accountEmail && <div className="text-gray-600">📧 {bill.accountEmail}</div>}
+                                {bill.accountUsername && <div className="text-gray-600">👤 {bill.accountUsername}</div>}
+                                {bill.accountPassword && (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-gray-600">
+                                      🔒 {showPasswords[bill.id] ? bill.accountPassword : '••••••••'}
+                                    </span>
+                                    <button
+                                      onClick={() => togglePasswordVisibility(bill.id)}
+                                      className="text-indigo-600 hover:text-indigo-700"
+                                    >
+                                      {showPasswords[bill.id] ? '🙈' : '👁️'}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
                             </td>
                             <td className="px-4 py-4">
                               <div className="flex gap-2">
                                 <button
                                   onClick={() => startEditingBill(bill)}
                                   className="p-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition"
+                                  title="Edit"
                                 >
                                   ✏️
                                 </button>
@@ -1022,6 +1021,7 @@
                                         ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' 
                                         : 'bg-green-100 text-green-700 hover:bg-green-200'
                                     }`}
+                                    title={bill.paid ? 'Mark unpaid' : 'Mark paid'}
                                   >
                                     ✓
                                   </button>
@@ -1029,6 +1029,7 @@
                                 <button
                                   onClick={() => deleteBill(bill.id)}
                                   className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition"
+                                  title="Delete"
                                 >
                                   🗑️
                                 </button>
@@ -1321,25 +1322,25 @@
                 </div>
                 <div className="p-6 space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Type</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Type *</label>
                     <div className="flex gap-4">
-                      <label className="flex items-center gap-2">
+                      <label className="flex items-center gap-2 cursor-pointer">
                         <input
                           type="radio"
                           value="bill"
                           checked={newBill.type === 'bill'}
                           onChange={(e) => setNewBill({...newBill, type: e.target.value})}
                         />
-                        <span>📄 Bill</span>
+                        <span>📄 Bill (one-time or recurring payment)</span>
                       </label>
-                      <label className="flex items-center gap-2">
+                      <label className="flex items-center gap-2 cursor-pointer">
                         <input
                           type="radio"
                           value="account"
                           checked={newBill.type === 'account'}
                           onChange={(e) => setNewBill({...newBill, type: e.target.value})}
                         />
-                        <span>💰 Account</span>
+                        <span>💰 Account (track balance)</span>
                       </label>
                     </div>
                   </div>
@@ -1347,17 +1348,18 @@
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        {newBill.type === 'bill' ? 'Vendor' : 'Account Name'} *
+                        {newBill.type === 'bill' ? 'Vendor/Service' : 'Account Name'} *
                       </label>
                       <input
                         type="text"
                         value={newBill.vendor}
                         onChange={(e) => setNewBill({...newBill, vendor: e.target.value})}
                         className="w-full px-4 py-2 border rounded-lg"
+                        placeholder={newBill.type === 'bill' ? 'Netflix, Utilities, etc.' : 'Bank, Credit Card, etc.'}
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Category *</label>
                       <select
                         value={newBill.category}
                         onChange={(e) => setNewBill({...newBill, category: e.target.value})}
@@ -1371,16 +1373,54 @@
                     </div>
                     
                     {newBill.type === 'account' ? (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Balance *</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={newBill.balance}
-                          onChange={(e) => setNewBill({...newBill, balance: e.target.value})}
-                          className="w-full px-4 py-2 border rounded-lg"
-                        />
-                      </div>
+                      <>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Current Balance *</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={newBill.balance}
+                            onChange={(e) => setNewBill({...newBill, balance: e.target.value})}
+                            className="w-full px-4 py-2 border rounded-lg"
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Scheduled Payment Amount</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={newBill.amount}
+                            onChange={(e) => setNewBill({...newBill, amount: e.target.value})}
+                            className="w-full px-4 py-2 border rounded-lg"
+                            placeholder="0.00"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">Optional: Set up recurring payment</p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Payment Due Date</label>
+                          <input
+                            type="date"
+                            value={newBill.dueDate}
+                            onChange={(e) => setNewBill({...newBill, dueDate: e.target.value})}
+                            className="w-full px-4 py-2 border rounded-lg"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">Optional: When payment is due</p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Payment Frequency</label>
+                          <select
+                            value={newBill.frequency}
+                            onChange={(e) => setNewBill({...newBill, frequency: e.target.value})}
+                            className="w-full px-4 py-2 border rounded-lg"
+                          >
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                            <option value="quarterly">Quarterly</option>
+                            <option value="yearly">Yearly</option>
+                          </select>
+                        </div>
+                      </>
                     ) : (
                       <>
                         <div>
@@ -1391,6 +1431,7 @@
                             value={newBill.amount}
                             onChange={(e) => setNewBill({...newBill, amount: e.target.value})}
                             className="w-full px-4 py-2 border rounded-lg"
+                            placeholder="0.00"
                           />
                         </div>
                         <div>
@@ -1402,8 +1443,57 @@
                             className="w-full px-4 py-2 border rounded-lg"
                           />
                         </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Frequency</label>
+                          <select
+                            value={newBill.frequency}
+                            onChange={(e) => setNewBill({...newBill, frequency: e.target.value})}
+                            className="w-full px-4 py-2 border rounded-lg"
+                          >
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                            <option value="quarterly">Quarterly</option>
+                            <option value="yearly">Yearly</option>
+                          </select>
+                        </div>
                       </>
                     )}
+
+                    <div className="md:col-span-2 border-t pt-4 mt-2">
+                      <h3 className="text-sm font-semibold text-gray-700 mb-3">Account Login Info (Optional)</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                          <input
+                            type="email"
+                            value={newBill.accountEmail}
+                            onChange={(e) => setNewBill({...newBill, accountEmail: e.target.value})}
+                            className="w-full px-4 py-2 border rounded-lg"
+                            placeholder="account@example.com"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Username</label>
+                          <input
+                            type="text"
+                            value={newBill.accountUsername}
+                            onChange={(e) => setNewBill({...newBill, accountUsername: e.target.value})}
+                            className="w-full px-4 py-2 border rounded-lg"
+                            placeholder="username"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                          <input
+                            type="password"
+                            value={newBill.accountPassword}
+                            onChange={(e) => setNewBill({...newBill, accountPassword: e.target.value})}
+                            className="w-full px-4 py-2 border rounded-lg"
+                            placeholder="••••••••"
+                          />
+                        </div>
+                      </div>
+                    </div>
                     
                     <div className="md:col-span-2">
                       <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
@@ -1412,8 +1502,27 @@
                         onChange={(e) => setNewBill({...newBill, notes: e.target.value})}
                         className="w-full px-4 py-2 border rounded-lg"
                         rows="3"
+                        placeholder="Additional notes..."
                       />
                     </div>
+                    
+                    {(newBill.type === 'bill' || (newBill.type === 'account' && newBill.amount && newBill.dueDate)) && (
+                      <div className="md:col-span-2">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={newBill.isRecurring}
+                            onChange={(e) => setNewBill({...newBill, isRecurring: e.target.checked})}
+                            className="w-4 h-4"
+                          />
+                          <span className="text-sm font-medium text-gray-700">
+                            {newBill.type === 'bill' 
+                              ? '🔄 Recurring bill (auto-create next due date when paid)'
+                              : '🔄 Recurring payment (auto-deduct from balance when paid)'}
+                          </span>
+                        </label>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="p-6 border-t flex gap-3 justify-end">
