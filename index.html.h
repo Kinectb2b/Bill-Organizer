@@ -8,13 +8,26 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 </head>
 <body>
   <div id="root"></div>
   
   <script type="text/babel">
     const { useState, useEffect } = React;
-    const { Calendar, DollarSign, AlertCircle, Plus, Eye, EyeOff, Trash2, Edit2, Check, X, Building2, User, TrendingUp } = lucide;
+
+    // Icon components
+    const Calendar = (props) => <i data-lucide="calendar" {...props}></i>;
+    const DollarSign = (props) => <i data-lucide="dollar-sign" {...props}></i>;
+    const Plus = (props) => <i data-lucide="plus" {...props}></i>;
+    const Eye = (props) => <i data-lucide="eye" {...props}></i>;
+    const EyeOff = (props) => <i data-lucide="eye-off" {...props}></i>;
+    const Trash2 = (props) => <i data-lucide="trash-2" {...props}></i>;
+    const Check = (props) => <i data-lucide="check" {...props}></i>;
+    const X = (props) => <i data-lucide="x" {...props}></i>;
+    const Building2 = (props) => <i data-lucide="building-2" {...props}></i>;
+    const User = (props) => <i data-lucide="user" {...props}></i>;
+    const TrendingUp = (props) => <i data-lucide="trending-up" {...props}></i>;
 
     const BillTracker = () => {
       const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -24,7 +37,6 @@
       const [showAddBill, setShowAddBill] = useState(false);
       const [selectedCategory, setSelectedCategory] = useState('all');
       const [showPasswords, setShowPasswords] = useState({});
-      const [editingId, setEditingId] = useState(null);
       const [view, setView] = useState('upcoming');
 
       const [newBill, setNewBill] = useState({
@@ -54,6 +66,10 @@
           localStorage.setItem('bills', JSON.stringify(bills));
         }
       }, [bills]);
+
+      useEffect(() => {
+        lucide.createIcons();
+      });
 
       const handleLogin = () => {
         if (username && password) {
@@ -532,11 +548,6 @@
     };
 
     ReactDOM.render(<BillTracker />, document.getElementById('root'));
-  </script>
-  
-  <script src="https://unpkg.com/lucide@latest"></script>
-  <script>
-    lucide.createIcons();
   </script>
 </body>
 </html>
