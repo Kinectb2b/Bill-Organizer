@@ -121,8 +121,23 @@
         if (savedBills) setBills(JSON.parse(savedBills));
         if (savedCategoryNames) setCategoryNames(JSON.parse(savedCategoryNames));
         
-        // Check if user already exists
-        if (!savedCreds) {
+        // Check if user already exists - if so, show login, otherwise show signup
+        if (savedCreds) {
+          const creds = JSON.parse(savedCreds);
+          
+          // MIGRATION: Update old account format to new format
+          if (creds && !creds.hasOwnProperty('fullName')) {
+            const updatedCreds = {
+              ...creds,
+              fullName: '',
+              email: ''
+            };
+            localStorage.setItem('userCredentials', JSON.stringify(updatedCreds));
+            console.log('Account migrated to new format');
+          }
+          
+          setIsSignupMode(false);
+        } else {
           setIsSignupMode(true);
         }
         
@@ -156,7 +171,12 @@
         const savedCreds = localStorage.getItem('userCredentials');
 
         if (!savedCreds) {
-          setLoginError('No account found. Please sign up first.');
+          setLoginError('No account found with this username.');
+          // Auto-switch to signup mode
+          setTimeout(() => {
+            setIsSignupMode(true);
+            setLoginError('');
+          }, 2000);
           return;
         }
 
@@ -614,6 +634,20 @@
                 <p className="text-gray-600 mt-2">
                   {isSignupMode ? 'Create your account' : 'Welcome back'}
                 </p>
+                
+                {/* Mode Indicator */}
+                <div className="mt-4 flex items-center justify-center gap-2">
+                  <div className={`px-4 py-2 rounded-lg font-semibold ${
+                    !isSignupMode ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500'
+                  }`}>
+                    Login
+                  </div>
+                  <div className={`px-4 py-2 rounded-lg font-semibold ${
+                    isSignupMode ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500'
+                  }`}>
+                    Sign Up
+                  </div>
+                </div>
               </div>
               <div className="space-y-4">
                 {loginError && (
@@ -691,7 +725,7 @@
                   {isSignupMode ? 'Create Account' : 'Login'}
                 </button>
                 
-                <div className="text-center">
+                <div className="text-center space-y-2">
                   <button
                     onClick={() => {
                       setIsSignupMode(!isSignupMode);
@@ -699,12 +733,26 @@
                       setPassword('');
                       setConfirmPassword('');
                     }}
-                    className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                    className="text-sm text-indigo-600 hover:text-indigo-700 font-medium block w-full"
                   >
                     {isSignupMode 
-                      ? 'Already have an account? Login' 
-                      : 'Need an account? Sign up'}
+                      ? '← Already have an account? Login' 
+                      : 'Need an account? Sign up →'}
                   </button>
+                  
+                  {!isSignupMode && (
+                    <button
+                      onClick={() => {
+                        if (confirm('Reset your account? This will delete all your data and you can create a new account.')) {
+                          localStorage.clear();
+                          window.location.reload();
+                        }
+                      }}
+                      className="text-xs text-gray-500 hover:text-gray-700"
+                    >
+                      Forgot credentials? Reset account
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
