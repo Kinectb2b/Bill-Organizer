@@ -44,8 +44,8 @@
       const [showPasswords, setShowPasswords] = useState({});
       const [view, setView] = useState('upcoming');
       const [showSettings, setShowSettings] = useState(false);
+      const [editingBill, setEditingBill] = useState(null);
       
-      // Category names with defaults
       const [categoryNames, setCategoryNames] = useState({
         personal: 'Personal',
         business1: 'Business 1',
@@ -65,16 +65,41 @@
         dueDate: '',
         amount: '',
         frequency: 'monthly',
+        isRecurring: true,
         notes: ''
       });
 
-      // Format date as M/D/Y
+      // Format date as M/D/Y - Fixed timezone issue
       const formatDate = (dateString) => {
-        const date = new Date(dateString);
+        const date = new Date(dateString + 'T00:00:00');
         const month = date.getMonth() + 1;
         const day = date.getDate();
         const year = date.getFullYear();
         return `${month}/${day}/${year}`;
+      };
+
+      // Get next due date based on frequency
+      const getNextDueDate = (currentDate, frequency) => {
+        const date = new Date(currentDate + 'T00:00:00');
+        
+        switch(frequency) {
+          case 'weekly':
+            date.setDate(date.getDate() + 7);
+            break;
+          case 'monthly':
+            date.setMonth(date.getMonth() + 1);
+            break;
+          case 'quarterly':
+            date.setMonth(date.getMonth() + 3);
+            break;
+          case 'yearly':
+            date.setFullYear(date.getFullYear() + 1);
+            break;
+          default:
+            date.setMonth(date.getMonth() + 1);
+        }
+        
+        return date.toISOString().split('T')[0];
       };
 
       useEffect(() => {
@@ -188,30 +213,120 @@
             dueDate: '',
             amount: '',
             frequency: 'monthly',
+            isRecurring: true,
             notes: ''
           });
           setShowAddBill(false);
         }
       };
 
+      const startEditingBill = (bill) => {
+        setEditingBill(bill);
+        setNewBill({
+          vendor: bill.vendor,
+          category: bill.category,
+          email: bill.email || '',
+          username: bill.username || '',
+          password: bill.password || '',
+          dueDate: bill.dueDate,
+          amount: bill.amount,
+          frequency: bill.frequency,
+          isRecurring: bill.isRecurring !== false,
+          notes: bill.notes || ''
+        });
+        setShowAddBill(true);
+      };
+
+      const updateBill = () => {
+        if (newBill.vendor && newBill.amount && newBill.dueDate) {
+          setBills(bills.map(bill => 
+            bill.id === editingBill.id 
+              ? { ...bill, ...newBill }
+              : bill
+          ));
+          setNewBill({
+            vendor: '',
+            category: 'personal',
+            email: '',
+            username: '',
+            password: '',
+            dueDate: '',
+            amount: '',
+            frequency: 'monthly',
+            isRecurring: true,
+            notes: ''
+          });
+          setEditingBill(null);
+          setShowAddBill(false);
+        }
+      };
+
+      const cancelEdit = () => {
+        setEditingBill(null);
+        setNewBill({
+          vendor: '',
+          category: 'personal',
+          email: '',
+          username: '',
+          password: '',
+          dueDate: '',
+          amount: '',
+          frequency: 'monthly',
+          isRecurring: true,
+          notes: ''
+        });
+        setShowAddBill(false);
+      };
+
       const togglePaid = (id) => {
-        setBills(bills.map(bill => {
-          if (bill.id === id) {
-            const updatedBill = { ...bill, paid: !bill.paid };
-            if (!bill.paid) {
-              updatedBill.history = [...(bill.history || []), {
-                date: new Date().toISOString(),
-                amount: bill.amount
-              }];
+        const bill = bills.find(b => b.id === id);
+        
+        if (!bill.paid && bill.isRecurring) {
+          // Create next recurring bill
+          const nextBill = {
+            ...bill,
+            id: Date.now(),
+            dueDate: getNextDueDate(bill.dueDate, bill.frequency),
+            paid: false,
+            history: []
+          };
+          
+          // Mark current as paid and add next bill
+          setBills(bills.map(b => {
+            if (b.id === id) {
+              return {
+                ...b,
+                paid: true,
+                history: [...(b.history || []), {
+                  date: new Date().toISOString(),
+                  amount: b.amount
+                }]
+              };
             }
-            return updatedBill;
-          }
-          return bill;
-        }));
+            return b;
+          }).concat(nextBill));
+        } else {
+          // Just toggle paid status
+          setBills(bills.map(bill => {
+            if (bill.id === id) {
+              const updatedBill = { ...bill, paid: !bill.paid };
+              if (!bill.paid) {
+                updatedBill.history = [...(bill.history || []), {
+                  date: new Date().toISOString(),
+                  amount: bill.amount
+                }];
+              }
+              return updatedBill;
+            }
+            return bill;
+          }));
+        }
       };
 
       const deleteBill = (id) => {
-        setBills(bills.filter(bill => bill.id !== id));
+        if (confirm('Are you sure you want to delete this bill?')) {
+          setBills(bills.filter(bill => bill.id !== id));
+        }
       };
 
       const togglePasswordVisibility = (id) => {
@@ -221,7 +336,7 @@
       const calculateStatus = (dueDate, paid) => {
         if (paid) return 'paid';
         const today = new Date();
-        const due = new Date(dueDate);
+        const due = new Date(dueDate + 'T00:00:00');
         const daysUntil = Math.ceil((due - today) / (1000 * 60 * 60 * 24));
         
         if (daysUntil < 0) return 'overdue';
@@ -459,6 +574,7 @@
                             <td className="px-4 py-4">
                               <div className="font-medium text-gray-800">{bill.vendor}</div>
                               {bill.notes && <div className="text-sm text-gray-500">{bill.notes}</div>}
+                              {bill.isRecurring && <div className="text-xs text-indigo-600 mt-1">🔄 Recurring</div>}
                             </td>
                             <td className="px-4 py-4">
                               <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 rounded text-sm">
@@ -493,6 +609,13 @@
                             </td>
                             <td className="px-4 py-4">
                               <div className="flex gap-2">
+                                <button
+                                  onClick={() => startEditingBill(bill)}
+                                  className="p-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition"
+                                  title="Edit bill"
+                                >
+                                  <Edit2 size={18} />
+                                </button>
                                 <button
                                   onClick={() => togglePaid(bill.id)}
                                   className={`p-2 rounded-lg transition ${
@@ -600,14 +723,16 @@
             </div>
           )}
 
-          {/* Add Bill Modal */}
+          {/* Add/Edit Bill Modal */}
           {showAddBill && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
               <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
                 <div className="p-6 border-b flex justify-between items-center">
-                  <h2 className="text-2xl font-bold text-gray-800">Add New Bill</h2>
+                  <h2 className="text-2xl font-bold text-gray-800">
+                    {editingBill ? 'Edit Bill' : 'Add New Bill'}
+                  </h2>
                   <button
-                    onClick={() => setShowAddBill(false)}
+                    onClick={cancelEdit}
                     className="p-2 hover:bg-gray-100 rounded-lg transition"
                   >
                     <X size={24} />
@@ -703,6 +828,19 @@
                     </div>
                   </div>
                   <div>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={newBill.isRecurring}
+                        onChange={(e) => setNewBill({...newBill, isRecurring: e.target.checked})}
+                        className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                      />
+                      <span className="text-sm font-medium text-gray-700">
+                        Recurring Bill (automatically create next bill when marked as paid)
+                      </span>
+                    </label>
+                  </div>
+                  <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
                     <textarea
                       value={newBill.notes}
@@ -715,16 +853,16 @@
                 </div>
                 <div className="p-6 border-t flex gap-3 justify-end">
                   <button
-                    onClick={() => setShowAddBill(false)}
+                    onClick={cancelEdit}
                     className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
                   >
                     Cancel
                   </button>
                   <button
-                    onClick={addBill}
+                    onClick={editingBill ? updateBill : addBill}
                     className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
                   >
-                    Add Bill
+                    {editingBill ? 'Update Bill' : 'Add Bill'}
                   </button>
                 </div>
               </div>
