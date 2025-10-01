@@ -25,6 +25,7 @@
       const [fullName, setFullName] = useState('');
       const [email, setEmail] = useState('');
       const [showLoginPassword, setShowLoginPassword] = useState(false);
+      const [showImportExport, setShowImportExport] = useState(false);
       const [bills, setBills] = useState([]);
       const [showAddBill, setShowAddBill] = useState(false);
       const [selectedCategory, setSelectedCategory] = useState('all');
@@ -530,6 +531,70 @@
         setCalendarDate(new Date());
       };
 
+      const exportData = () => {
+        const savedBills = localStorage.getItem('bills');
+        const savedCategoryNames = localStorage.getItem('categoryNames');
+        
+        const exportData = {
+          bills: savedBills ? JSON.parse(savedBills) : [],
+          categoryNames: savedCategoryNames ? JSON.parse(savedCategoryNames) : {
+            personal: 'Personal',
+            business1: 'Business 1',
+            business2: 'Business 2',
+            business3: 'Business 3'
+          },
+          exportDate: new Date().toISOString(),
+          version: '1.0'
+        };
+        
+        const dataStr = JSON.stringify(exportData, null, 2);
+        const dataBlob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(dataBlob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `bill-tracker-backup-${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        
+        alert('✅ Data exported successfully! Save this file in a safe place.');
+      };
+
+      const importData = (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const importedData = JSON.parse(e.target.result);
+            
+            if (!importedData.bills || !importedData.categoryNames) {
+              alert('❌ Invalid backup file format');
+              return;
+            }
+            
+            // Import the data
+            localStorage.setItem('bills', JSON.stringify(importedData.bills));
+            localStorage.setItem('categoryNames', JSON.stringify(importedData.categoryNames));
+            
+            // Update state
+            setBills(importedData.bills);
+            setCategoryNames(importedData.categoryNames);
+            
+            alert(`✅ Data imported successfully!\n\n${importedData.bills.length} bills/accounts restored\nExported on: ${new Date(importedData.exportDate).toLocaleDateString()}`);
+            
+            // Close the import/export modal
+            setShowImportExport(false);
+          } catch (error) {
+            console.error('Import error:', error);
+            alert('❌ Error importing data. Please check the file format.');
+          }
+        };
+        reader.readAsText(file);
+      };
+
       const openProfileUpdate = () => {
         setProfileForm({
           fullName: fullName || '',
@@ -746,6 +811,13 @@
                 
                 <div className="text-center space-y-2">
                   <button
+                    onClick={() => setShowImportExport(true)}
+                    className="text-sm text-green-600 hover:text-green-700 font-medium block w-full mb-3 py-2 border border-green-300 rounded-lg bg-green-50"
+                  >
+                    💾 Backup & Restore Data
+                  </button>
+                  
+                  <button
                     onClick={() => {
                       setIsSignupMode(!isSignupMode);
                       setLoginError('');
@@ -817,6 +889,107 @@
                 </div>
               </div>
             </div>
+            
+            {showImportExport && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
+                  <div className="p-6 border-b">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-800">Backup & Restore</h3>
+                      <p className="text-sm text-gray-600">Export or import your data</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <button
+                      onClick={exportData}
+                      className="px-4 py-3 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition font-medium flex items-center justify-center gap-2"
+                    >
+                      <span>💾</span>
+                      Export Data
+                    </button>
+                    <label className="block">
+                      <input
+                        type="file"
+                        accept=".json"
+                        onChange={importData}
+                        className="hidden"
+                      />
+                      <span className="px-4 py-3 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition font-medium flex items-center justify-center gap-2 cursor-pointer">
+                        <span>📥</span>
+                        Import Data
+                      </span>
+                    </label>
+                  </div>
+                </div>
+                
+                <div className="p-6 border-b">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h2 className="text-2xl font-bold text-gray-800">Backup & Restore</h2>
+                        <p className="text-sm text-gray-600 mt-1">Export or import your data</p>
+                      </div>
+                      <button
+                        onClick={() => setShowImportExport(false)}
+                        className="p-2 hover:bg-gray-100 rounded-lg transition text-2xl"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                  <div className="p-6 space-y-4">
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <h3 className="font-semibold text-gray-800 mb-2">💾 Export Data</h3>
+                      <p className="text-sm text-gray-600 mb-3">
+                        Download all your bills, accounts, and categories as a backup file.
+                      </p>
+                      <button
+                        onClick={() => {
+                          exportData();
+                          setShowImportExport(false);
+                        }}
+                        className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium"
+                      >
+                        Download Backup File
+                      </button>
+                    </div>
+                    
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                      <h3 className="font-semibold text-gray-800 mb-2">📥 Import Data</h3>
+                      <p className="text-sm text-gray-600 mb-3">
+                        Restore your data from a previously exported backup file.
+                      </p>
+                      <label className="block">
+                        <input
+                          type="file"
+                          accept=".json"
+                          onChange={importData}
+                          className="hidden"
+                          id="import-file-input"
+                        />
+                        <span className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-medium cursor-pointer inline-block text-center">
+                          Choose Backup File
+                        </span>
+                      </label>
+                    </div>
+                    
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                      <p className="text-xs text-yellow-800">
+                        <strong>Note:</strong> Importing will replace your current bills and categories with the backup data.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="p-6 border-t">
+                    <button
+                      onClick={() => setShowImportExport(false)}
+                      className="w-full px-6 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         );
       }
