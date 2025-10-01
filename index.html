@@ -429,7 +429,7 @@
       });
 
       const totalDue = filteredBills
-        .filter(bill => bill.type !== 'account' && !bill.paid)
+        .filter(bill => !bill.paid && bill.amount)
         .reduce((sum, bill) => sum + parseFloat(bill.amount || 0), 0);
       
       const totalBalance = filteredBills
