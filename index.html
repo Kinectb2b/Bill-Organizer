@@ -764,16 +764,42 @@
                       <button
                         onClick={() => {
                           const savedCreds = localStorage.getItem('userCredentials');
+                          const savedBills = localStorage.getItem('bills');
+                          const categoryNames = localStorage.getItem('categoryNames');
+                          
+                          let message = '=== ACCOUNT STATUS ===\n\n';
+                          
                           if (savedCreds) {
                             const creds = JSON.parse(savedCreds);
-                            alert(`Your stored username is: ${creds.username}`);
+                            message += `✅ Account Found!\nUsername: ${creds.username}\n\n`;
                           } else {
-                            alert('No account found. Please sign up.');
+                            message += '❌ No account found\n\n';
                           }
+                          
+                          if (savedBills) {
+                            const bills = JSON.parse(savedBills);
+                            message += `Bills stored: ${bills.length}\n`;
+                          } else {
+                            message += 'No bills stored\n';
+                          }
+                          
+                          if (categoryNames) {
+                            message += 'Categories: ✅\n';
+                          } else {
+                            message += 'Categories: ❌\n';
+                          }
+                          
+                          message += `\n=== ALL STORAGE KEYS ===\n`;
+                          for (let i = 0; i < localStorage.length; i++) {
+                            const key = localStorage.key(i);
+                            message += `${key}\n`;
+                          }
+                          
+                          alert(message);
                         }}
                         className="text-xs text-blue-500 hover:text-blue-700 block w-full"
                       >
-                        Show my username
+                        🔍 Check my account status
                       </button>
                       <button
                         onClick={() => {
