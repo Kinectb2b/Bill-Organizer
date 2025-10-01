@@ -69,18 +69,17 @@
         notes: ''
       });
 
-      // Format date as M/D/Y - Fixed timezone issue
       const formatDate = (dateString) => {
-        const date = new Date(dateString + 'T00:00:00');
-        const month = date.getMonth() + 1;
-        const day = date.getDate();
-        const year = date.getFullYear();
-        return `${month}/${day}/${year}`;
+        const parts = dateString.split('-');
+        const year = parts[0];
+        const month = parts[1];
+        const day = parts[2];
+        return `${parseInt(month)}/${parseInt(day)}/${year}`;
       };
 
-      // Get next due date based on frequency
       const getNextDueDate = (currentDate, frequency) => {
-        const date = new Date(currentDate + 'T00:00:00');
+        const parts = currentDate.split('-');
+        const date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
         
         switch(frequency) {
           case 'weekly':
@@ -99,7 +98,10 @@
             date.setMonth(date.getMonth() + 1);
         }
         
-        return date.toISOString().split('T')[0];
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
       };
 
       useEffect(() => {
@@ -133,7 +135,12 @@
       }, [categoryNames]);
 
       useEffect(() => {
-        lucide.createIcons();
+        const timer = setTimeout(() => {
+          if (window.lucide) {
+            window.lucide.createIcons();
+          }
+        }, 0);
+        return () => clearTimeout(timer);
       });
 
       const handleLogin = () => {
@@ -147,10 +154,7 @@
         const savedCreds = localStorage.getItem('userCredentials');
 
         if (isFirstTime || !savedCreds) {
-          const credentials = {
-            username: username,
-            password: password
-          };
+          const credentials = { username, password };
           localStorage.setItem('userCredentials', JSON.stringify(credentials));
           localStorage.setItem('activeSession', 'true');
           setIsLoggedIn(true);
@@ -282,7 +286,6 @@
         const bill = bills.find(b => b.id === id);
         
         if (!bill.paid && bill.isRecurring) {
-          // Create next recurring bill
           const nextBill = {
             ...bill,
             id: Date.now(),
@@ -291,7 +294,6 @@
             history: []
           };
           
-          // Mark current as paid and add next bill
           setBills(bills.map(b => {
             if (b.id === id) {
               return {
@@ -306,7 +308,6 @@
             return b;
           }).concat(nextBill));
         } else {
-          // Just toggle paid status
           setBills(bills.map(bill => {
             if (bill.id === id) {
               const updatedBill = { ...bill, paid: !bill.paid };
@@ -336,7 +337,8 @@
       const calculateStatus = (dueDate, paid) => {
         if (paid) return 'paid';
         const today = new Date();
-        const due = new Date(dueDate + 'T00:00:00');
+        const parts = dueDate.split('-');
+        const due = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
         const daysUntil = Math.ceil((due - today) / (1000 * 60 * 60 * 24));
         
         if (daysUntil < 0) return 'overdue';
@@ -381,7 +383,7 @@
                 {isFirstTime && (
                   <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                     <p className="text-sm text-blue-800">
-                      First time here? Create your username and password below. You'll use these to log in each time.
+                      First time here? Create your username and password below.
                     </p>
                   </div>
                 )}
@@ -429,7 +431,7 @@
       return (
         <div className="min-h-screen bg-gray-50">
           <header className="bg-white shadow-sm border-b">
-            <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+            <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center flex-wrap gap-2">
               <div className="flex items-center gap-3">
                 <div className="bg-indigo-600 p-2 rounded-lg">
                   <DollarSign className="text-white" size={24} />
@@ -445,7 +447,7 @@
                   className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition flex items-center gap-2"
                 >
                   <Settings size={18} />
-                  Settings
+                  <span className="hidden sm:inline">Settings</span>
                 </button>
                 <button
                   onClick={handleLogout}
@@ -646,14 +648,17 @@
             </div>
           </main>
 
-          {/* Settings Modal */}
           {showSettings && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
               <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full">
                 <div className="p-6 border-b flex justify-between items-center">
                   <h2 className="text-2xl font-bold text-gray-800">Settings</h2>
                   <button
-                    onClick={() => setShowSettings(false)}
+                    onClick={() => {
+                      setShowSettings(false);
+                      setEditingCategory(null);
+                      setTempCategoryName('');
+                    }}
                     className="p-2 hover:bg-gray-100 rounded-lg transition"
                   >
                     <X size={24} />
@@ -671,7 +676,9 @@
                               type="text"
                               value={tempCategoryName}
                               onChange={(e) => setTempCategoryName(e.target.value)}
-                              onKeyPress={(e) => e.key === 'Enter' && saveCategoryName()}
+                              onKeyPress={(e) => {
+                                if (e.key === 'Enter') saveCategoryName();
+                              }}
                               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                               autoFocus
                             />
@@ -713,7 +720,11 @@
                 </div>
                 <div className="p-6 border-t flex justify-end">
                   <button
-                    onClick={() => setShowSettings(false)}
+                    onClick={() => {
+                      setShowSettings(false);
+                      setEditingCategory(null);
+                      setTempCategoryName('');
+                    }}
                     className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
                   >
                     Done
@@ -723,7 +734,6 @@
             </div>
           )}
 
-          {/* Add/Edit Bill Modal */}
           {showAddBill && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
               <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
