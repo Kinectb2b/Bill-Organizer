@@ -28,11 +28,14 @@
     const Building2 = (props) => <i data-lucide="building-2" {...props}></i>;
     const User = (props) => <i data-lucide="user" {...props}></i>;
     const TrendingUp = (props) => <i data-lucide="trending-up" {...props}></i>;
+    const AlertCircle = (props) => <i data-lucide="alert-circle" {...props}></i>;
 
     const BillTracker = () => {
       const [isLoggedIn, setIsLoggedIn] = useState(false);
       const [username, setUsername] = useState('');
       const [password, setPassword] = useState('');
+      const [isFirstTime, setIsFirstTime] = useState(false);
+      const [loginError, setLoginError] = useState('');
       const [bills, setBills] = useState([]);
       const [showAddBill, setShowAddBill] = useState(false);
       const [selectedCategory, setSelectedCategory] = useState('all');
@@ -53,11 +56,21 @@
 
       useEffect(() => {
         const savedBills = localStorage.getItem('bills');
-        const savedUser = localStorage.getItem('loggedInUser');
+        const savedCreds = localStorage.getItem('userCredentials');
+        const activeSession = localStorage.getItem('activeSession');
+        
         if (savedBills) setBills(JSON.parse(savedBills));
-        if (savedUser) {
+        
+        // Check if this is first time user
+        if (!savedCreds) {
+          setIsFirstTime(true);
+        }
+        
+        // Check if there's an active session
+        if (activeSession === 'true' && savedCreds) {
+          const creds = JSON.parse(savedCreds);
+          setUsername(creds.username);
           setIsLoggedIn(true);
-          setUsername(savedUser);
         }
       }, []);
 
@@ -72,9 +85,35 @@
       });
 
       const handleLogin = () => {
-        if (username && password) {
+        setLoginError('');
+        
+        if (!username || !password) {
+          setLoginError('Please enter both username and password');
+          return;
+        }
+
+        const savedCreds = localStorage.getItem('userCredentials');
+
+        if (isFirstTime || !savedCreds) {
+          // First time - create account
+          const credentials = {
+            username: username,
+            password: password
+          };
+          localStorage.setItem('userCredentials', JSON.stringify(credentials));
+          localStorage.setItem('activeSession', 'true');
           setIsLoggedIn(true);
-          localStorage.setItem('loggedInUser', username);
+          setIsFirstTime(false);
+        } else {
+          // Verify credentials
+          const creds = JSON.parse(savedCreds);
+          if (creds.username === username && creds.password === password) {
+            localStorage.setItem('activeSession', 'true');
+            setIsLoggedIn(true);
+          } else {
+            setLoginError('Incorrect username or password');
+            setPassword('');
+          }
         }
       };
 
@@ -82,7 +121,7 @@
         setIsLoggedIn(false);
         setUsername('');
         setPassword('');
-        localStorage.removeItem('loggedInUser');
+        localStorage.setItem('activeSession', 'false');
       };
 
       const addBill = () => {
@@ -175,9 +214,24 @@
                   <DollarSign className="text-white" size={32} />
                 </div>
                 <h1 className="text-3xl font-bold text-gray-800">Bill Tracker</h1>
-                <p className="text-gray-600 mt-2">Manage your personal and business expenses</p>
+                <p className="text-gray-600 mt-2">
+                  {isFirstTime ? 'Create your account' : 'Manage your personal and business expenses'}
+                </p>
+                {isFirstTime && (
+                  <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <p className="text-sm text-blue-800">
+                      First time here? Create your username and password below. You'll use these to log in each time.
+                    </p>
+                  </div>
+                )}
               </div>
               <div className="space-y-4">
+                {loginError && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2">
+                    <AlertCircle size={20} className="text-red-600" />
+                    <p className="text-sm text-red-800">{loginError}</p>
+                  </div>
+                )}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Username</label>
                   <input
@@ -203,7 +257,7 @@
                   onClick={handleLogin}
                   className="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 transition font-semibold"
                 >
-                  Login
+                  {isFirstTime ? 'Create Account' : 'Login'}
                 </button>
               </div>
             </div>
