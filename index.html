@@ -1009,6 +1009,13 @@
               </div>
               <div className="flex gap-2">
                 <button
+                  onClick={() => setShowImportExport(true)}
+                  className="px-4 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition flex items-center gap-2"
+                >
+                  <span>💾</span>
+                  <span className="hidden sm:inline">Backup</span>
+                </button>
+                <button
                   onClick={() => setShowSettings(true)}
                   className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition flex items-center gap-2"
                 >
@@ -2150,6 +2157,79 @@
                     className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
                   >
                     Save Changes
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showImportExport && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
+                <div className="p-6 border-b">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h2 className="text-2xl font-bold text-gray-800">Backup & Restore</h2>
+                      <p className="text-sm text-gray-600 mt-1">Export or import your data</p>
+                    </div>
+                    <button
+                      onClick={() => setShowImportExport(false)}
+                      className="p-2 hover:bg-gray-100 rounded-lg transition text-2xl"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+                <div className="p-6 space-y-4">
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h3 className="font-semibold text-gray-800 mb-2">💾 Export Data</h3>
+                    <p className="text-sm text-gray-600 mb-3">
+                      Download all your bills, accounts, categories, and payment history as a backup file.
+                    </p>
+                    <button
+                      onClick={() => {
+                        exportData();
+                      }}
+                      className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium"
+                    >
+                      Download Backup File
+                    </button>
+                  </div>
+                  
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <h3 className="font-semibold text-gray-800 mb-2">📥 Import Data</h3>
+                    <p className="text-sm text-gray-600 mb-3">
+                      Restore your data from a previously exported backup file. This will replace your current data.
+                    </p>
+                    <label className="block">
+                      <input
+                        type="file"
+                        accept=".json"
+                        onChange={(e) => {
+                          importData(e);
+                          e.target.value = '';
+                        }}
+                        className="hidden"
+                        id="import-file-main"
+                      />
+                      <span className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-medium cursor-pointer inline-block text-center">
+                        Choose Backup File
+                      </span>
+                    </label>
+                  </div>
+                  
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                    <p className="text-xs text-yellow-800">
+                      <strong>💡 Tip:</strong> Export your data regularly to keep a backup! The file is safe to email to yourself or save to cloud storage.
+                    </p>
+                  </div>
+                </div>
+                <div className="p-6 border-t">
+                  <button
+                    onClick={() => setShowImportExport(false)}
+                    className="w-full px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
+                  >
+                    Close
                   </button>
                 </div>
               </div>
