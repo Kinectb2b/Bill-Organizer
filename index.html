@@ -19,8 +19,11 @@
       const [isLoggedIn, setIsLoggedIn] = useState(false);
       const [username, setUsername] = useState('');
       const [password, setPassword] = useState('');
-      const [isFirstTime, setIsFirstTime] = useState(false);
+      const [isSignupMode, setIsSignupMode] = useState(false);
       const [loginError, setLoginError] = useState('');
+      const [confirmPassword, setConfirmPassword] = useState('');
+      const [fullName, setFullName] = useState('');
+      const [email, setEmail] = useState('');
       const [bills, setBills] = useState([]);
       const [showAddBill, setShowAddBill] = useState(false);
       const [selectedCategory, setSelectedCategory] = useState('all');
@@ -43,6 +46,15 @@
       const [newBalance, setNewBalance] = useState('');
       const [showHistory, setShowHistory] = useState(false);
       const [historyBill, setHistoryBill] = useState(null);
+      const [showProfileUpdate, setShowProfileUpdate] = useState(false);
+      const [profileForm, setProfileForm] = useState({
+        fullName: '',
+        email: '',
+        currentPassword: '',
+        newPassword: '',
+        confirmNewPassword: ''
+      });
+      const [profileError, setProfileError] = useState('');
 
       const [newBill, setNewBill] = useState({
         type: 'bill',
@@ -106,13 +118,16 @@
         if (savedBills) setBills(JSON.parse(savedBills));
         if (savedCategoryNames) setCategoryNames(JSON.parse(savedCategoryNames));
         
+        // Check if user already exists
         if (!savedCreds) {
-          setIsFirstTime(true);
+          setIsSignupMode(true);
         }
         
         if (activeSession === 'true' && savedCreds) {
           const creds = JSON.parse(savedCreds);
           setUsername(creds.username);
+          setFullName(creds.fullName || '');
+          setEmail(creds.email || '');
           setIsLoggedIn(true);
         }
       }, []);
@@ -137,28 +152,65 @@
 
         const savedCreds = localStorage.getItem('userCredentials');
 
-        if (isFirstTime || !savedCreds) {
-          const credentials = { username, password };
-          localStorage.setItem('userCredentials', JSON.stringify(credentials));
-          localStorage.setItem('activeSession', 'true');
-          setIsLoggedIn(true);
-          setIsFirstTime(false);
-        } else {
-          const creds = JSON.parse(savedCreds);
-          if (creds.username === username && creds.password === password) {
-            localStorage.setItem('activeSession', 'true');
-            setIsLoggedIn(true);
-          } else {
-            setLoginError('Incorrect username or password');
-            setPassword('');
-          }
+        if (!savedCreds) {
+          setLoginError('No account found. Please sign up first.');
+          return;
         }
+
+        const creds = JSON.parse(savedCreds);
+        if (creds.username === username && creds.password === password) {
+          localStorage.setItem('activeSession', 'true');
+          setFullName(creds.fullName || '');
+          setEmail(creds.email || '');
+          setIsLoggedIn(true);
+        } else {
+          setLoginError('Incorrect username or password');
+          setPassword('');
+        }
+      };
+
+      const handleSignup = () => {
+        setLoginError('');
+        
+        if (!username || !password) {
+          setLoginError('Please enter username and password');
+          return;
+        }
+
+        if (password !== confirmPassword) {
+          setLoginError('Passwords do not match');
+          return;
+        }
+
+        if (password.length < 6) {
+          setLoginError('Password must be at least 6 characters');
+          return;
+        }
+
+        const savedCreds = localStorage.getItem('userCredentials');
+        if (savedCreds) {
+          setLoginError('An account already exists. Please login instead.');
+          return;
+        }
+
+        const credentials = { 
+          username, 
+          password,
+          fullName: fullName || '',
+          email: email || ''
+        };
+        localStorage.setItem('userCredentials', JSON.stringify(credentials));
+        localStorage.setItem('activeSession', 'true');
+        setIsLoggedIn(true);
+        setIsSignupMode(false);
       };
 
       const handleLogout = () => {
         setIsLoggedIn(false);
         setUsername('');
         setPassword('');
+        setFullName('');
+        setEmail('');
         localStorage.setItem('activeSession', 'false');
       };
 
@@ -395,6 +447,65 @@
         setShowHistory(true);
       };
 
+      const openProfileUpdate = () => {
+        setProfileForm({
+          fullName: fullName || '',
+          email: email || '',
+          currentPassword: '',
+          newPassword: '',
+          confirmNewPassword: ''
+        });
+        setProfileError('');
+        setShowProfileUpdate(true);
+      };
+
+      const updateProfile = () => {
+        setProfileError('');
+        
+        const savedCreds = JSON.parse(localStorage.getItem('userCredentials'));
+        
+        // If trying to change password, verify current password
+        if (profileForm.newPassword) {
+          if (!profileForm.currentPassword) {
+            setProfileError('Please enter your current password');
+            return;
+          }
+          if (profileForm.currentPassword !== savedCreds.password) {
+            setProfileError('Current password is incorrect');
+            return;
+          }
+          if (profileForm.newPassword.length < 6) {
+            setProfileError('New password must be at least 6 characters');
+            return;
+          }
+          if (profileForm.newPassword !== profileForm.confirmNewPassword) {
+            setProfileError('New passwords do not match');
+            return;
+          }
+        }
+
+        // Update credentials
+        const updatedCreds = {
+          ...savedCreds,
+          fullName: profileForm.fullName,
+          email: profileForm.email,
+          password: profileForm.newPassword || savedCreds.password
+        };
+
+        localStorage.setItem('userCredentials', JSON.stringify(updatedCreds));
+        setFullName(profileForm.fullName);
+        setEmail(profileForm.email);
+        
+        setShowProfileUpdate(false);
+        setProfileForm({
+          fullName: '',
+          email: '',
+          currentPassword: '',
+          newPassword: '',
+          confirmNewPassword: ''
+        });
+      };
+
       const togglePasswordVisibility = (id) => {
         setShowPasswords(prev => ({ ...prev, [id]: !prev[id] }));
       };
@@ -448,15 +559,8 @@
                 </div>
                 <h1 className="text-3xl font-bold text-gray-800">Bill Tracker</h1>
                 <p className="text-gray-600 mt-2">
-                  {isFirstTime ? 'Create your account' : 'Manage your personal and business expenses'}
+                  {isSignupMode ? 'Create your account' : 'Welcome back'}
                 </p>
-                {isFirstTime && (
-                  <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                    <p className="text-sm text-blue-800">
-                      First time here? Create your username and password below.
-                    </p>
-                  </div>
-                )}
               </div>
               <div className="space-y-4">
                 {loginError && (
@@ -465,8 +569,34 @@
                     <p className="text-sm text-red-800">{loginError}</p>
                   </div>
                 )}
+                
+                {isSignupMode && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Full Name (optional)</label>
+                      <input
+                        type="text"
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        placeholder="John Doe"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Email (optional)</label>
+                      <input
+                        type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        placeholder="john@example.com"
+                      />
+                    </div>
+                  </>
+                )}
+                
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Username</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Username *</label>
                   <input
                     type="text"
                     value={username}
@@ -476,22 +606,53 @@
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Password *</label>
                   <input
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleLogin()}
+                    onKeyPress={(e) => e.key === 'Enter' && (isSignupMode ? handleSignup() : handleLogin())}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                    placeholder="Enter password"
+                    placeholder={isSignupMode ? "Minimum 6 characters" : "Enter password"}
                   />
                 </div>
+                
+                {isSignupMode && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Confirm Password *</label>
+                    <input
+                      type="password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && handleSignup()}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      placeholder="Re-enter password"
+                    />
+                  </div>
+                )}
+                
                 <button
-                  onClick={handleLogin}
+                  onClick={isSignupMode ? handleSignup : handleLogin}
                   className="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 transition font-semibold"
                 >
-                  {isFirstTime ? 'Create Account' : 'Login'}
+                  {isSignupMode ? 'Create Account' : 'Login'}
                 </button>
+                
+                <div className="text-center">
+                  <button
+                    onClick={() => {
+                      setIsSignupMode(!isSignupMode);
+                      setLoginError('');
+                      setPassword('');
+                      setConfirmPassword('');
+                    }}
+                    className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                  >
+                    {isSignupMode 
+                      ? 'Already have an account? Login' 
+                      : 'Need an account? Sign up'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -508,7 +669,7 @@
                 </div>
                 <div>
                   <h1 className="text-2xl font-bold text-gray-800">Bill Tracker</h1>
-                  <p className="text-sm text-gray-600">Welcome, {username}</p>
+                  <p className="text-sm text-gray-600">Welcome, {fullName || username}</p>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -788,7 +949,7 @@
 
           {showSettings && (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-              <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full">
+              <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
                 <div className="p-6 border-b flex justify-between items-center">
                   <h2 className="text-2xl font-bold text-gray-800">Settings</h2>
                   <button
@@ -802,6 +963,41 @@
                     ✕
                   </button>
                 </div>
+                
+                <div className="p-6 border-b">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-800">My Profile</h3>
+                      <p className="text-sm text-gray-600">Manage your account information</p>
+                    </div>
+                    <button
+                      onClick={openProfileUpdate}
+                      className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition flex items-center gap-2"
+                    >
+                      <span>✏️</span>
+                      Edit Profile
+                    </button>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+                    <div className="flex items-start gap-2">
+                      <span className="text-gray-600 text-sm font-medium w-24">Username:</span>
+                      <span className="text-gray-800 font-medium">{username}</span>
+                    </div>
+                    {fullName && (
+                      <div className="flex items-start gap-2">
+                        <span className="text-gray-600 text-sm font-medium w-24">Full Name:</span>
+                        <span className="text-gray-800">{fullName}</span>
+                      </div>
+                    )}
+                    {email && (
+                      <div className="flex items-start gap-2">
+                        <span className="text-gray-600 text-sm font-medium w-24">Email:</span>
+                        <span className="text-gray-800">{email}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
                 <div className="p-6">
                   <h3 className="text-lg font-semibold text-gray-800 mb-4">Category Names</h3>
                   <p className="text-sm text-gray-600 mb-4">Click the edit icon to rename your categories</p>
@@ -1287,6 +1483,110 @@
                     className="w-full px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
                   >
                     Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showProfileUpdate && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
+                <div className="p-6 border-b">
+                  <h2 className="text-2xl font-bold text-gray-800">Update Profile</h2>
+                  <p className="text-sm text-gray-600 mt-2">Update your account information</p>
+                </div>
+                <div className="p-6 space-y-4">
+                  {profileError && (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2">
+                      <span className="text-red-600">⚠️</span>
+                      <p className="text-sm text-red-800">{profileError}</p>
+                    </div>
+                  )}
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Full Name</label>
+                    <input
+                      type="text"
+                      value={profileForm.fullName}
+                      onChange={(e) => setProfileForm({...profileForm, fullName: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      placeholder="John Doe"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                    <input
+                      type="email"
+                      value={profileForm.email}
+                      onChange={(e) => setProfileForm({...profileForm, email: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      placeholder="john@example.com"
+                    />
+                  </div>
+                  
+                  <div className="pt-4 border-t">
+                    <h3 className="text-sm font-semibold text-gray-700 mb-3">Change Password (optional)</h3>
+                    
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Current Password</label>
+                        <input
+                          type="password"
+                          value={profileForm.currentPassword}
+                          onChange={(e) => setProfileForm({...profileForm, currentPassword: e.target.value})}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                          placeholder="Enter current password"
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">New Password</label>
+                        <input
+                          type="password"
+                          value={profileForm.newPassword}
+                          onChange={(e) => setProfileForm({...profileForm, newPassword: e.target.value})}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                          placeholder="Minimum 6 characters"
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Confirm New Password</label>
+                        <input
+                          type="password"
+                          value={profileForm.confirmNewPassword}
+                          onChange={(e) => setProfileForm({...profileForm, confirmNewPassword: e.target.value})}
+                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                          placeholder="Re-enter new password"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="p-6 border-t flex gap-3 justify-end">
+                  <button
+                    onClick={() => {
+                      setShowProfileUpdate(false);
+                      setProfileForm({
+                        fullName: '',
+                        email: '',
+                        currentPassword: '',
+                        newPassword: '',
+                        confirmNewPassword: ''
+                      });
+                      setProfileError('');
+                    }}
+                    className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={updateProfile}
+                    className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
+                  >
+                    Save Changes
                   </button>
                 </div>
               </div>
