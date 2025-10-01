@@ -8,24 +8,28 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
   <div id="root"></div>
   
   <script type="text/babel">
     const { useState, useEffect } = React;
+    const { createClient } = supabase;
+
+    // Your Supabase credentials
+    const SUPABASE_URL = 'https://ryfgwmvvevmcqlqnogze.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5Zmd3bXZ2ZXZtY3FscW5vZ3plIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkzMzYyODcsImV4cCI6MjA3NDkxMjI4N30.8R4GkEK792hDWcu2v4aKL7f0hKfa1HKoD2b-vPd-qxc';
+    
+    const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     const BillTracker = () => {
-      const [isLoggedIn, setIsLoggedIn] = useState(false);
-      const [username, setUsername] = useState('');
-      const [password, setPassword] = useState('');
-      const [isSignupMode, setIsSignupMode] = useState(false);
-      const [loginError, setLoginError] = useState('');
-      const [confirmPassword, setConfirmPassword] = useState('');
-      const [fullName, setFullName] = useState('');
+      const [user, setUser] = useState(null);
+      const [loading, setLoading] = useState(true);
       const [email, setEmail] = useState('');
-      const [showLoginPassword, setShowLoginPassword] = useState(false);
-      const [showImportExport, setShowImportExport] = useState(false);
+      const [password, setPassword] = useState('');
+      const [isSignUp, setIsSignUp] = useState(false);
+      const [authError, setAuthError] = useState('');
       const [bills, setBills] = useState([]);
       const [showAddBill, setShowAddBill] = useState(false);
       const [selectedCategory, setSelectedCategory] = useState('all');
@@ -33,9 +37,7 @@
       const [view, setView] = useState('upcoming');
       const [showSettings, setShowSettings] = useState(false);
       const [editingBill, setEditingBill] = useState(null);
-      const [showCalendar, setShowCalendar] = useState(false);
-      const [calendarDate, setCalendarDate] = useState(new Date());
-      const [selectedDayBills, setSelectedDayBills] = useState(null);
+      const [syncing, setSyncing] = useState(false);
       
       const [categoryNames, setCategoryNames] = useState({
         personal: 'Personal',
@@ -46,20 +48,6 @@
       
       const [editingCategory, setEditingCategory] = useState(null);
       const [tempCategoryName, setTempCategoryName] = useState('');
-      const [showBalanceUpdate, setShowBalanceUpdate] = useState(false);
-      const [balanceUpdateId, setBalanceUpdateId] = useState(null);
-      const [newBalance, setNewBalance] = useState('');
-      const [showHistory, setShowHistory] = useState(false);
-      const [historyBill, setHistoryBill] = useState(null);
-      const [showProfileUpdate, setShowProfileUpdate] = useState(false);
-      const [profileForm, setProfileForm] = useState({
-        fullName: '',
-        email: '',
-        currentPassword: '',
-        newPassword: '',
-        confirmNewPassword: ''
-      });
-      const [profileError, setProfileError] = useState('');
 
       const [newBill, setNewBill] = useState({
         type: 'bill',
@@ -79,7 +67,242 @@
         accountType: 'loan'
       });
 
+      useEffect(() => {
+        checkUser();
+        
+        const { data: authListener } = supabaseClient.auth.onAuthStateChange((event, session) => {
+          if (session?.user) {
+            setUser(session.user);
+            loadUserData(session.user.id);
+          } else {
+            setUser(null);
+            setBills([]);
+          }
+        });
+
+        return () => {
+          authListener?.subscription?.unsubscribe();
+        };
+      }, []);
+
+      const checkUser = async () => {
+        try {
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          if (session?.user) {
+            setUser(session.user);
+            await loadUserData(session.user.id);
+          }
+        } catch (error) {
+          console.error('Error checking user:', error);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const loadUserData = async (userId) => {
+        try {
+          setSyncing(true);
+          
+          const { data: billsData, error: billsError } = await supabaseClient
+            .from('bills')
+            .select('*')
+            .eq('user_id', userId)
+            .order('due_date', { ascending: true });
+
+          if (billsError) throw billsError;
+
+          const billsWithHistory = await Promise.all(
+            (billsData || []).map(async (bill) => {
+              const { data: historyData } = await supabaseClient
+                .from('bill_history')
+                .select('*')
+                .eq('bill_id', bill.id)
+                .order('date', { ascending: false });
+              
+              return {
+                ...bill,
+                dueDate: bill.due_date,
+                isRecurring: bill.is_recurring,
+                interestRate: bill.interest_rate,
+                accountType: bill.account_type,
+                history: historyData || []
+              };
+            })
+          );
+
+          setBills(billsWithHistory);
+
+          const { data: categoryData } = await supabaseClient
+            .from('category_names')
+            .select('*')
+            .eq('user_id', userId)
+            .single();
+
+          if (categoryData) {
+            setCategoryNames({
+              personal: categoryData.personal,
+              business1: categoryData.business1,
+              business2: categoryData.business2,
+              business3: categoryData.business3
+            });
+          }
+        } catch (error) {
+          console.error('Error loading data:', error);
+        } finally {
+          setSyncing(false);
+        }
+      };
+
+      const handleSignUp = async () => {
+        setAuthError('');
+        if (!email || !password) {
+          setAuthError('Please enter email and password');
+          return;
+        }
+
+        if (password.length < 6) {
+          setAuthError('Password must be at least 6 characters');
+          return;
+        }
+
+        try {
+          const { data, error } = await supabaseClient.auth.signUp({
+            email,
+            password,
+          });
+
+          if (error) throw error;
+
+          if (data?.user && !data?.session) {
+            setAuthError('✅ Check your email for the confirmation link!');
+          } else if (data?.session) {
+            setAuthError('✅ Account created! Logging you in...');
+          }
+        } catch (error) {
+          setAuthError(error.message);
+        }
+      };
+
+      const handleSignIn = async () => {
+        setAuthError('');
+        if (!email || !password) {
+          setAuthError('Please enter email and password');
+          return;
+        }
+
+        try {
+          const { data, error } = await supabaseClient.auth.signInWithPassword({
+            email,
+            password,
+          });
+
+          if (error) throw error;
+        } catch (error) {
+          setAuthError(error.message);
+        }
+      };
+
+      const handleSignOut = async () => {
+        await supabaseClient.auth.signOut();
+        setUser(null);
+        setBills([]);
+      };
+
+      const saveBillToSupabase = async (bill) => {
+        try {
+          setSyncing(true);
+          const billData = {
+            id: bill.id,
+            user_id: user.id,
+            type: bill.type,
+            vendor: bill.vendor,
+            category: bill.category,
+            email: bill.email,
+            username: bill.username,
+            password: bill.password,
+            due_date: bill.dueDate,
+            amount: bill.amount,
+            frequency: bill.frequency,
+            is_recurring: bill.isRecurring,
+            notes: bill.notes,
+            balance: bill.balance,
+            interest_rate: bill.interestRate,
+            term: bill.term,
+            account_type: bill.accountType,
+            paid: bill.paid,
+            updated_at: new Date().toISOString()
+          };
+
+          const { error } = await supabaseClient
+            .from('bills')
+            .upsert(billData);
+
+          if (error) throw error;
+
+          if (bill.history && bill.history.length > 0) {
+            const lastHistory = bill.history[bill.history.length - 1];
+            if (!lastHistory.id) {
+              const historyData = {
+                bill_id: bill.id,
+                user_id: user.id,
+                date: lastHistory.date,
+                amount: lastHistory.amount,
+                type: lastHistory.type,
+                previous_balance: lastHistory.previousBalance,
+                new_balance: lastHistory.newBalance
+              };
+
+              await supabaseClient
+                .from('bill_history')
+                .insert(historyData);
+            }
+          }
+        } catch (error) {
+          console.error('Error saving bill:', error);
+          alert('Error saving bill. Please try again.');
+        } finally {
+          setSyncing(false);
+        }
+      };
+
+      const deleteBillFromSupabase = async (billId) => {
+        try {
+          setSyncing(true);
+          const { error } = await supabaseClient
+            .from('bills')
+            .delete()
+            .eq('id', billId)
+            .eq('user_id', user.id);
+
+          if (error) throw error;
+        } catch (error) {
+          console.error('Error deleting bill:', error);
+        } finally {
+          setSyncing(false);
+        }
+      };
+
+      const saveCategoryNames = async (names) => {
+        try {
+          const { error } = await supabaseClient
+            .from('category_names')
+            .upsert({
+              user_id: user.id,
+              personal: names.personal,
+              business1: names.business1,
+              business2: names.business2,
+              business3: names.business3,
+              updated_at: new Date().toISOString()
+            });
+
+          if (error) throw error;
+        } catch (error) {
+          console.error('Error saving category names:', error);
+        }
+      };
+
       const formatDate = (dateString) => {
+        if (!dateString) return '';
         const parts = dateString.split('-');
         const year = parts[0];
         const month = parts[1];
@@ -114,162 +337,7 @@
         return `${y}-${m}-${d}`;
       };
 
-      useEffect(() => {
-        const savedBills = localStorage.getItem('bills');
-        const savedCreds = localStorage.getItem('userCredentials');
-        const activeSession = localStorage.getItem('activeSession');
-        const savedCategoryNames = localStorage.getItem('categoryNames');
-        
-        if (savedBills) setBills(JSON.parse(savedBills));
-        if (savedCategoryNames) setCategoryNames(JSON.parse(savedCategoryNames));
-        
-        // Check if user already exists - if so, show login, otherwise show signup
-        if (savedCreds) {
-          const creds = JSON.parse(savedCreds);
-          
-          // MIGRATION: Update old account format to new format
-          if (creds && !creds.hasOwnProperty('fullName')) {
-            const updatedCreds = {
-              ...creds,
-              fullName: '',
-              email: ''
-            };
-            localStorage.setItem('userCredentials', JSON.stringify(updatedCreds));
-            console.log('Account migrated to new format');
-          }
-          
-          setIsSignupMode(false);
-        } else {
-          setIsSignupMode(true);
-        }
-        
-        if (activeSession === 'true' && savedCreds) {
-          const creds = JSON.parse(savedCreds);
-          setUsername(creds.username);
-          setFullName(creds.fullName || '');
-          setEmail(creds.email || '');
-          setIsLoggedIn(true);
-        }
-      }, []);
-
-      useEffect(() => {
-        if (bills.length > 0) {
-          localStorage.setItem('bills', JSON.stringify(bills));
-        }
-      }, [bills]);
-
-      useEffect(() => {
-        localStorage.setItem('categoryNames', JSON.stringify(categoryNames));
-      }, [categoryNames]);
-
-      const handleLogin = () => {
-        setLoginError('');
-        
-        if (!username || !password) {
-          setLoginError('Please enter both username and password');
-          return;
-        }
-
-        const savedCreds = localStorage.getItem('userCredentials');
-
-        if (!savedCreds) {
-          setLoginError('No account found. Please create an account first.');
-          setTimeout(() => {
-            setIsSignupMode(true);
-            setLoginError('');
-          }, 2000);
-          return;
-        }
-
-        try {
-          const creds = JSON.parse(savedCreds);
-          console.log('Attempting login for username:', username);
-          console.log('Stored username:', creds.username);
-          
-          if (creds.username === username && creds.password === password) {
-            localStorage.setItem('activeSession', 'true');
-            setFullName(creds.fullName || '');
-            setEmail(creds.email || '');
-            setIsLoggedIn(true);
-          } else if (creds.username !== username) {
-            setLoginError('Username not found. Please check your username or sign up.');
-          } else {
-            setLoginError('Incorrect password. Please try again.');
-            setPassword('');
-          }
-        } catch (error) {
-          console.error('Login error:', error);
-          setLoginError('Login error. Please try resetting your account.');
-        }
-      };
-
-      const handleSignup = () => {
-        setLoginError('');
-        
-        if (!username || !password) {
-          setLoginError('Please enter username and password');
-          return;
-        }
-
-        if (password !== confirmPassword) {
-          setLoginError('Passwords do not match');
-          return;
-        }
-
-        if (password.length < 6) {
-          setLoginError('Password must be at least 6 characters');
-          return;
-        }
-
-        const savedCreds = localStorage.getItem('userCredentials');
-        if (savedCreds) {
-          setLoginError('An account already exists. Please login instead.');
-          return;
-        }
-
-        const credentials = { 
-          username, 
-          password,
-          fullName: fullName || '',
-          email: email || ''
-        };
-        localStorage.setItem('userCredentials', JSON.stringify(credentials));
-        localStorage.setItem('activeSession', 'true');
-        setIsLoggedIn(true);
-        setIsSignupMode(false);
-      };
-
-      const handleLogout = () => {
-        setIsLoggedIn(false);
-        setUsername('');
-        setPassword('');
-        setFullName('');
-        setEmail('');
-        localStorage.setItem('activeSession', 'false');
-      };
-
-      const startEditingCategory = (categoryKey) => {
-        setEditingCategory(categoryKey);
-        setTempCategoryName(categoryNames[categoryKey]);
-      };
-
-      const saveCategoryName = () => {
-        if (tempCategoryName.trim() && editingCategory) {
-          setCategoryNames({
-            ...categoryNames,
-            [editingCategory]: tempCategoryName.trim()
-          });
-          setEditingCategory(null);
-          setTempCategoryName('');
-        }
-      };
-
-      const cancelEditingCategory = () => {
-        setEditingCategory(null);
-        setTempCategoryName('');
-      };
-
-      const addBill = () => {
+      const addBill = async () => {
         const isValid = newBill.type === 'bill' 
           ? (newBill.vendor && newBill.amount && newBill.dueDate)
           : (newBill.vendor && newBill.balance);
@@ -281,7 +349,10 @@
             paid: false,
             history: []
           };
+          
+          await saveBillToSupabase(bill);
           setBills([...bills, bill]);
+          
           setNewBill({
             type: 'bill',
             vendor: '',
@@ -300,6 +371,106 @@
             accountType: 'loan'
           });
           setShowAddBill(false);
+        }
+      };
+
+      const updateBill = async () => {
+        const isValid = newBill.type === 'bill' 
+          ? (newBill.vendor && newBill.amount && newBill.dueDate)
+          : (newBill.vendor && newBill.balance);
+          
+        if (isValid) {
+          const updatedBills = bills.map(bill => 
+            bill.id === editingBill.id 
+              ? { ...bill, ...newBill }
+              : bill
+          );
+          
+          const updatedBill = updatedBills.find(b => b.id === editingBill.id);
+          await saveBillToSupabase(updatedBill);
+          setBills(updatedBills);
+          
+          setNewBill({
+            type: 'bill',
+            vendor: '',
+            category: 'personal',
+            email: '',
+            username: '',
+            password: '',
+            dueDate: '',
+            amount: '',
+            frequency: 'monthly',
+            isRecurring: true,
+            notes: '',
+            balance: '',
+            interestRate: '',
+            term: '',
+            accountType: 'loan'
+          });
+          setEditingBill(null);
+          setShowAddBill(false);
+        }
+      };
+
+      const togglePaid = async (id) => {
+        const bill = bills.find(b => b.id === id);
+        const isAccount = bill.type === 'account';
+        
+        if (!bill.paid && bill.isRecurring) {
+          const nextBill = {
+            ...bill,
+            id: Date.now(),
+            dueDate: getNextDueDate(bill.dueDate, bill.frequency),
+            paid: false,
+            history: []
+          };
+          
+          if (isAccount && bill.balance && bill.amount) {
+            nextBill.balance = (parseFloat(bill.balance) - parseFloat(bill.amount)).toFixed(2);
+          }
+          
+          const updatedCurrentBill = {
+            ...bill,
+            paid: true,
+            history: [...(bill.history || []), {
+              date: new Date().toISOString(),
+              amount: bill.amount,
+              type: 'payment',
+              previousBalance: isAccount ? bill.balance : null,
+              newBalance: isAccount && bill.balance && bill.amount 
+                ? (parseFloat(bill.balance) - parseFloat(bill.amount)).toFixed(2) 
+                : null
+            }]
+          };
+          
+          await saveBillToSupabase(updatedCurrentBill);
+          await saveBillToSupabase(nextBill);
+          
+          setBills(bills.map(b => b.id === id ? updatedCurrentBill : b).concat(nextBill));
+        } else {
+          const updatedBill = {
+            ...bill,
+            paid: !bill.paid,
+            history: !bill.paid ? [...(bill.history || []), {
+              date: new Date().toISOString(),
+              amount: bill.amount,
+              type: 'payment',
+              previousBalance: isAccount ? bill.balance : null,
+              newBalance: isAccount && bill.balance && bill.amount 
+                ? (parseFloat(bill.balance) - parseFloat(bill.amount)).toFixed(2) 
+                : null
+            }] : bill.history
+          };
+          
+          await saveBillToSupabase(updatedBill);
+          setBills(bills.map(b => b.id === id ? updatedBill : b));
+        }
+      };
+
+      const deleteBill = async (id) => {
+        if (confirm('Are you sure you want to delete this item?')) {
+          await deleteBillFromSupabase(id);
+          setBills(bills.filter(bill => bill.id !== id));
         }
       };
 
@@ -325,39 +496,6 @@
         setShowAddBill(true);
       };
 
-      const updateBill = () => {
-        const isValid = newBill.type === 'bill' 
-          ? (newBill.vendor && newBill.amount && newBill.dueDate)
-          : (newBill.vendor && newBill.balance);
-          
-        if (isValid) {
-          setBills(bills.map(bill => 
-            bill.id === editingBill.id 
-              ? { ...bill, ...newBill }
-              : bill
-          ));
-          setNewBill({
-            type: 'bill',
-            vendor: '',
-            category: 'personal',
-            email: '',
-            username: '',
-            password: '',
-            dueDate: '',
-            amount: '',
-            frequency: 'monthly',
-            isRecurring: true,
-            notes: '',
-            balance: '',
-            interestRate: '',
-            term: '',
-            accountType: 'loan'
-          });
-          setEditingBill(null);
-          setShowAddBill(false);
-        }
-      };
-
       const cancelEdit = () => {
         setEditingBill(null);
         setNewBill({
@@ -380,278 +518,27 @@
         setShowAddBill(false);
       };
 
-      const togglePaid = (id) => {
-        const bill = bills.find(b => b.id === id);
-        const isAccount = bill.type === 'account';
-        
-        if (!bill.paid && bill.isRecurring) {
-          const nextBill = {
-            ...bill,
-            id: Date.now(),
-            dueDate: getNextDueDate(bill.dueDate, bill.frequency),
-            paid: false,
-            history: []
+      const startEditingCategory = (categoryKey) => {
+        setEditingCategory(categoryKey);
+        setTempCategoryName(categoryNames[categoryKey]);
+      };
+
+      const saveCategoryName = async () => {
+        if (tempCategoryName.trim() && editingCategory) {
+          const newNames = {
+            ...categoryNames,
+            [editingCategory]: tempCategoryName.trim()
           };
-          
-          // If it's an account with a balance, reduce the balance by the payment amount
-          if (isAccount && bill.balance && bill.amount) {
-            nextBill.balance = (parseFloat(bill.balance) - parseFloat(bill.amount)).toFixed(2);
-          }
-          
-          setBills(bills.map(b => {
-            if (b.id === id) {
-              return {
-                ...b,
-                paid: true,
-                history: [...(b.history || []), {
-                  date: new Date().toISOString(),
-                  amount: b.amount,
-                  type: 'payment',
-                  previousBalance: isAccount ? b.balance : null,
-                  newBalance: isAccount && b.balance && b.amount 
-                    ? (parseFloat(b.balance) - parseFloat(b.amount)).toFixed(2) 
-                    : null
-                }]
-              };
-            }
-            return b;
-          }).concat(nextBill));
-        } else {
-          setBills(bills.map(bill => {
-            if (bill.id === id) {
-              const updatedBill = { ...bill, paid: !bill.paid };
-              if (!bill.paid) {
-                const isAcct = bill.type === 'account';
-                updatedBill.history = [...(bill.history || []), {
-                  date: new Date().toISOString(),
-                  amount: bill.amount,
-                  type: 'payment',
-                  previousBalance: isAcct ? bill.balance : null,
-                  newBalance: isAcct && bill.balance && bill.amount 
-                    ? (parseFloat(bill.balance) - parseFloat(bill.amount)).toFixed(2) 
-                    : null
-                }];
-              }
-              return updatedBill;
-            }
-            return bill;
-          }));
+          setCategoryNames(newNames);
+          await saveCategoryNames(newNames);
+          setEditingCategory(null);
+          setTempCategoryName('');
         }
       };
 
-      const deleteBill = (id) => {
-        if (confirm('Are you sure you want to delete this item?')) {
-          setBills(bills.filter(bill => bill.id !== id));
-        }
-      };
-
-      const openBalanceUpdate = (id) => {
-        const bill = bills.find(b => b.id === id);
-        setBalanceUpdateId(id);
-        setNewBalance(bill.balance || '');
-        setShowBalanceUpdate(true);
-      };
-
-      const updateBalance = () => {
-        if (newBalance && balanceUpdateId) {
-          setBills(bills.map(bill => {
-            if (bill.id === balanceUpdateId) {
-              return {
-                ...bill,
-                balance: newBalance,
-                history: [...(bill.history || []), {
-                  date: new Date().toISOString(),
-                  amount: null,
-                  type: 'balance_update',
-                  previousBalance: bill.balance,
-                  newBalance: newBalance
-                }]
-              };
-            }
-            return bill;
-          }));
-          setShowBalanceUpdate(false);
-          setBalanceUpdateId(null);
-          setNewBalance('');
-        }
-      };
-
-      const openHistory = (bill) => {
-        setHistoryBill(bill);
-        setShowHistory(true);
-      };
-
-      const getDaysInMonth = (date) => {
-        const year = date.getFullYear();
-        const month = date.getMonth();
-        const firstDay = new Date(year, month, 1);
-        const lastDay = new Date(year, month + 1, 0);
-        const daysInMonth = lastDay.getDate();
-        const startingDayOfWeek = firstDay.getDay();
-        
-        const days = [];
-        
-        // Add empty cells for days before month starts
-        for (let i = 0; i < startingDayOfWeek; i++) {
-          days.push(null);
-        }
-        
-        // Add all days in month
-        for (let day = 1; day <= daysInMonth; day++) {
-          days.push(new Date(year, month, day));
-        }
-        
-        return days;
-      };
-
-      const getBillsForDate = (date) => {
-        if (!date) return [];
-        const dateStr = date.toISOString().split('T')[0];
-        return bills.filter(bill => {
-          if (!bill.dueDate) return false;
-          return bill.dueDate === dateStr;
-        });
-      };
-
-      const handleDayClick = (date) => {
-        if (!date) return;
-        const dayBills = getBillsForDate(date);
-        if (dayBills.length > 0) {
-          setSelectedDayBills({ date, bills: dayBills });
-        }
-      };
-
-      const changeMonth = (direction) => {
-        const newDate = new Date(calendarDate);
-        newDate.setMonth(newDate.getMonth() + direction);
-        setCalendarDate(newDate);
-      };
-
-      const goToToday = () => {
-        setCalendarDate(new Date());
-      };
-
-      const exportData = () => {
-        const savedBills = localStorage.getItem('bills');
-        const savedCategoryNames = localStorage.getItem('categoryNames');
-        
-        const exportData = {
-          bills: savedBills ? JSON.parse(savedBills) : [],
-          categoryNames: savedCategoryNames ? JSON.parse(savedCategoryNames) : {
-            personal: 'Personal',
-            business1: 'Business 1',
-            business2: 'Business 2',
-            business3: 'Business 3'
-          },
-          exportDate: new Date().toISOString(),
-          version: '1.0'
-        };
-        
-        const dataStr = JSON.stringify(exportData, null, 2);
-        const dataBlob = new Blob([dataStr], { type: 'application/json' });
-        const url = URL.createObjectURL(dataBlob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `bill-tracker-backup-${new Date().toISOString().split('T')[0]}.json`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        
-        alert('✅ Data exported successfully! Save this file in a safe place.');
-      };
-
-      const importData = (event) => {
-        const file = event.target.files[0];
-        if (!file) return;
-        
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          try {
-            const importedData = JSON.parse(e.target.result);
-            
-            if (!importedData.bills || !importedData.categoryNames) {
-              alert('❌ Invalid backup file format');
-              return;
-            }
-            
-            // Import the data
-            localStorage.setItem('bills', JSON.stringify(importedData.bills));
-            localStorage.setItem('categoryNames', JSON.stringify(importedData.categoryNames));
-            
-            // Update state
-            setBills(importedData.bills);
-            setCategoryNames(importedData.categoryNames);
-            
-            alert(`✅ Data imported successfully!\n\n${importedData.bills.length} bills/accounts restored\nExported on: ${new Date(importedData.exportDate).toLocaleDateString()}`);
-            
-            // Close the import/export modal
-            setShowImportExport(false);
-          } catch (error) {
-            console.error('Import error:', error);
-            alert('❌ Error importing data. Please check the file format.');
-          }
-        };
-        reader.readAsText(file);
-      };
-
-      const openProfileUpdate = () => {
-        setProfileForm({
-          fullName: fullName || '',
-          email: email || '',
-          currentPassword: '',
-          newPassword: '',
-          confirmNewPassword: ''
-        });
-        setProfileError('');
-        setShowProfileUpdate(true);
-      };
-
-      const updateProfile = () => {
-        setProfileError('');
-        
-        const savedCreds = JSON.parse(localStorage.getItem('userCredentials'));
-        
-        // If trying to change password, verify current password
-        if (profileForm.newPassword) {
-          if (!profileForm.currentPassword) {
-            setProfileError('Please enter your current password');
-            return;
-          }
-          if (profileForm.currentPassword !== savedCreds.password) {
-            setProfileError('Current password is incorrect');
-            return;
-          }
-          if (profileForm.newPassword.length < 6) {
-            setProfileError('New password must be at least 6 characters');
-            return;
-          }
-          if (profileForm.newPassword !== profileForm.confirmNewPassword) {
-            setProfileError('New passwords do not match');
-            return;
-          }
-        }
-
-        // Update credentials
-        const updatedCreds = {
-          ...savedCreds,
-          fullName: profileForm.fullName,
-          email: profileForm.email,
-          password: profileForm.newPassword || savedCreds.password
-        };
-
-        localStorage.setItem('userCredentials', JSON.stringify(updatedCreds));
-        setFullName(profileForm.fullName);
-        setEmail(profileForm.email);
-        
-        setShowProfileUpdate(false);
-        setProfileForm({
-          fullName: '',
-          email: '',
-          currentPassword: '',
-          newPassword: '',
-          confirmNewPassword: ''
-        });
+      const cancelEditingCategory = () => {
+        setEditingCategory(null);
+        setTempCategoryName('');
       };
 
       const togglePasswordVisibility = (id) => {
@@ -697,7 +584,18 @@
 
       const categories = ['all', 'personal', 'business1', 'business2', 'business3'];
 
-      if (!isLoggedIn) {
+      if (loading) {
+        return (
+          <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+            <div className="text-center">
+              <div className="text-6xl mb-4">💰</div>
+              <div className="text-xl text-gray-700">Loading...</div>
+            </div>
+          </div>
+        );
+      }
+
+      if (!user) {
         return (
           <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
@@ -707,289 +605,62 @@
                 </div>
                 <h1 className="text-3xl font-bold text-gray-800">Bill Tracker</h1>
                 <p className="text-gray-600 mt-2">
-                  {isSignupMode ? 'Create your account' : 'Welcome back'}
+                  {isSignUp ? 'Create your account' : 'Welcome back'}
                 </p>
-                
-                {/* Mode Indicator */}
-                <div className="mt-4 flex items-center justify-center gap-2">
-                  <div className={`px-4 py-2 rounded-lg font-semibold ${
-                    !isSignupMode ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500'
-                  }`}>
-                    Login
-                  </div>
-                  <div className={`px-4 py-2 rounded-lg font-semibold ${
-                    isSignupMode ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500'
-                  }`}>
-                    Sign Up
-                  </div>
-                </div>
               </div>
+              
               <div className="space-y-4">
-                {loginError && (
-                  <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2">
-                    <span className="text-red-600">⚠️</span>
-                    <p className="text-sm text-red-800">{loginError}</p>
+                {authError && (
+                  <div className={`p-3 border rounded-lg ${
+                    authError.includes('✅') 
+                      ? 'bg-green-50 border-green-200 text-green-800' 
+                      : 'bg-red-50 border-red-200 text-red-800'
+                  }`}>
+                    <p className="text-sm">{authError}</p>
                   </div>
-                )}
-                
-                {isSignupMode && (
-                  <>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Full Name (optional)</label>
-                      <input
-                        type="text"
-                        value={fullName}
-                        onChange={(e) => setFullName(e.target.value)}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                        placeholder="John Doe"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Email (optional)</label>
-                      <input
-                        type="email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                        placeholder="john@example.com"
-                      />
-                    </div>
-                  </>
                 )}
                 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Username *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
                   <input
-                    type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                    placeholder="Enter username"
+                    placeholder="your@email.com"
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Password *</label>
-                  <div className="relative">
-                    <input
-                      type={showLoginPassword ? "text" : "password"}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      onKeyPress={(e) => e.key === 'Enter' && (isSignupMode ? handleSignup() : handleLogin())}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent pr-12"
-                      placeholder={isSignupMode ? "Minimum 6 characters" : "Enter password"}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowLoginPassword(!showLoginPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
-                    >
-                      {showLoginPassword ? '🙈' : '👁️'}
-                    </button>
-                  </div>
-                </div>
                 
-                {isSignupMode && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Confirm Password *</label>
-                    <input
-                      type="password"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      onKeyPress={(e) => e.key === 'Enter' && handleSignup()}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                      placeholder="Re-enter password"
-                    />
-                  </div>
-                )}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && (isSignUp ? handleSignUp() : handleSignIn())}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    placeholder={isSignUp ? "Minimum 6 characters" : "Enter password"}
+                  />
+                </div>
                 
                 <button
-                  onClick={isSignupMode ? handleSignup : handleLogin}
+                  onClick={isSignUp ? handleSignUp : handleSignIn}
                   className="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 transition font-semibold"
                 >
-                  {isSignupMode ? 'Create Account' : 'Login'}
+                  {isSignUp ? 'Sign Up' : 'Sign In'}
                 </button>
                 
-                <div className="text-center space-y-2">
-                  <button
-                    onClick={() => setShowImportExport(true)}
-                    className="text-sm text-green-600 hover:text-green-700 font-medium block w-full mb-3 py-2 border border-green-300 rounded-lg bg-green-50"
-                  >
-                    💾 Backup & Restore Data
-                  </button>
-                  
-                  <button
-                    onClick={() => {
-                      setIsSignupMode(!isSignupMode);
-                      setLoginError('');
-                      setPassword('');
-                      setConfirmPassword('');
-                    }}
-                    className="text-sm text-indigo-600 hover:text-indigo-700 font-medium block w-full"
-                  >
-                    {isSignupMode 
-                      ? '← Already have an account? Login' 
-                      : 'Need an account? Sign up →'}
-                  </button>
-                  
-                  {!isSignupMode && (
-                    <>
-                      <button
-                        onClick={() => {
-                          const savedCreds = localStorage.getItem('userCredentials');
-                          const savedBills = localStorage.getItem('bills');
-                          const categoryNames = localStorage.getItem('categoryNames');
-                          
-                          let message = '=== ACCOUNT STATUS ===\n\n';
-                          
-                          if (savedCreds) {
-                            const creds = JSON.parse(savedCreds);
-                            message += `✅ Account Found!\nUsername: ${creds.username}\n\n`;
-                          } else {
-                            message += '❌ No account found\n\n';
-                          }
-                          
-                          if (savedBills) {
-                            const bills = JSON.parse(savedBills);
-                            message += `Bills stored: ${bills.length}\n`;
-                          } else {
-                            message += 'No bills stored\n';
-                          }
-                          
-                          if (categoryNames) {
-                            message += 'Categories: ✅\n';
-                          } else {
-                            message += 'Categories: ❌\n';
-                          }
-                          
-                          message += `\n=== ALL STORAGE KEYS ===\n`;
-                          for (let i = 0; i < localStorage.length; i++) {
-                            const key = localStorage.key(i);
-                            message += `${key}\n`;
-                          }
-                          
-                          alert(message);
-                        }}
-                        className="text-xs text-blue-500 hover:text-blue-700 block w-full"
-                      >
-                        🔍 Check my account status
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (confirm('Reset your account? This will DELETE ALL your data (bills, accounts, everything) and you can create a new account. Are you sure?')) {
-                            localStorage.clear();
-                            window.location.reload();
-                          }
-                        }}
-                        className="text-xs text-red-500 hover:text-red-700 block w-full"
-                      >
-                        Reset account (deletes all data)
-                      </button>
-                    </>
-                  )}
-                </div>
+                <button
+                  onClick={() => {
+                    setIsSignUp(!isSignUp);
+                    setAuthError('');
+                  }}
+                  className="w-full text-sm text-indigo-600 hover:text-indigo-700"
+                >
+                  {isSignUp ? 'Already have an account? Sign In' : 'Need an account? Sign Up'}
+                </button>
               </div>
             </div>
-            
-            {showImportExport && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-                <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
-                  <div className="p-6 border-b">
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <h3 className="text-lg font-semibold text-gray-800">Backup & Restore</h3>
-                      <p className="text-sm text-gray-600">Export or import your data</p>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <button
-                      onClick={exportData}
-                      className="px-4 py-3 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition font-medium flex items-center justify-center gap-2"
-                    >
-                      <span>💾</span>
-                      Export Data
-                    </button>
-                    <label className="block">
-                      <input
-                        type="file"
-                        accept=".json"
-                        onChange={importData}
-                        className="hidden"
-                      />
-                      <span className="px-4 py-3 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition font-medium flex items-center justify-center gap-2 cursor-pointer">
-                        <span>📥</span>
-                        Import Data
-                      </span>
-                    </label>
-                  </div>
-                </div>
-                
-                <div className="p-6 border-b">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h2 className="text-2xl font-bold text-gray-800">Backup & Restore</h2>
-                        <p className="text-sm text-gray-600 mt-1">Export or import your data</p>
-                      </div>
-                      <button
-                        onClick={() => setShowImportExport(false)}
-                        className="p-2 hover:bg-gray-100 rounded-lg transition text-2xl"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  </div>
-                  <div className="p-6 space-y-4">
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                      <h3 className="font-semibold text-gray-800 mb-2">💾 Export Data</h3>
-                      <p className="text-sm text-gray-600 mb-3">
-                        Download all your bills, accounts, and categories as a backup file.
-                      </p>
-                      <button
-                        onClick={() => {
-                          exportData();
-                          setShowImportExport(false);
-                        }}
-                        className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium"
-                      >
-                        Download Backup File
-                      </button>
-                    </div>
-                    
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                      <h3 className="font-semibold text-gray-800 mb-2">📥 Import Data</h3>
-                      <p className="text-sm text-gray-600 mb-3">
-                        Restore your data from a previously exported backup file.
-                      </p>
-                      <label className="block">
-                        <input
-                          type="file"
-                          accept=".json"
-                          onChange={importData}
-                          className="hidden"
-                          id="import-file-input"
-                        />
-                        <span className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-medium cursor-pointer inline-block text-center">
-                          Choose Backup File
-                        </span>
-                      </label>
-                    </div>
-                    
-                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                      <p className="text-xs text-yellow-800">
-                        <strong>Note:</strong> Importing will replace your current bills and categories with the backup data.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="p-6 border-t">
-                    <button
-                      onClick={() => setShowImportExport(false)}
-                      className="w-full px-6 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition"
-                    >
-                      Close
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         );
       }
@@ -1004,29 +675,23 @@
                 </div>
                 <div>
                   <h1 className="text-2xl font-bold text-gray-800">Bill Tracker</h1>
-                  <p className="text-sm text-gray-600">Welcome, {fullName || username}</p>
+                  <p className="text-sm text-gray-600">
+                    {user.email} {syncing && <span className="text-indigo-600">• Syncing...</span>}
+                  </p>
                 </div>
               </div>
               <div className="flex gap-2">
                 <button
-                  onClick={() => setShowImportExport(true)}
-                  className="px-4 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition flex items-center gap-2"
-                >
-                  <span>💾</span>
-                  <span className="hidden sm:inline">Backup</span>
-                </button>
-                <button
                   onClick={() => setShowSettings(true)}
-                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition flex items-center gap-2"
+                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition"
                 >
-                  <span>⚙️</span>
-                  <span className="hidden sm:inline">Settings</span>
+                  ⚙️ Settings
                 </button>
                 <button
-                  onClick={handleLogout}
+                  onClick={handleSignOut}
                   className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition"
                 >
-                  Logout
+                  Sign Out
                 </button>
               </div>
             </div>
@@ -1080,29 +745,22 @@
               <div className="p-4 border-b flex flex-wrap gap-2 items-center justify-between">
                 <div className="flex gap-2 flex-wrap">
                   <button
-                    onClick={() => { setView('upcoming'); setShowCalendar(false); }}
-                    className={`px-4 py-2 rounded-lg transition ${view === 'upcoming' && !showCalendar ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                    onClick={() => setView('upcoming')}
+                    className={`px-4 py-2 rounded-lg transition ${view === 'upcoming' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
                   >
                     Upcoming
                   </button>
                   <button
-                    onClick={() => { setView('paid'); setShowCalendar(false); }}
-                    className={`px-4 py-2 rounded-lg transition ${view === 'paid' && !showCalendar ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                    onClick={() => setView('paid')}
+                    className={`px-4 py-2 rounded-lg transition ${view === 'paid' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
                   >
                     Paid
                   </button>
                   <button
-                    onClick={() => { setView('all'); setShowCalendar(false); }}
-                    className={`px-4 py-2 rounded-lg transition ${view === 'all' && !showCalendar ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                    onClick={() => setView('all')}
+                    className={`px-4 py-2 rounded-lg transition ${view === 'all' ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
                   >
-                    All Bills
-                  </button>
-                  <button
-                    onClick={() => setShowCalendar(true)}
-                    className={`px-4 py-2 rounded-lg transition flex items-center gap-2 ${showCalendar ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-                  >
-                    <span>📅</span>
-                    Calendar
+                    All Items
                   </button>
                 </div>
                 <button
@@ -1132,96 +790,7 @@
                 </div>
               </div>
 
-              {showCalendar ? (
-                <div className="p-6">
-                  <div className="flex items-center justify-between mb-6">
-                    <button
-                      onClick={() => changeMonth(-1)}
-                      className="p-2 hover:bg-gray-100 rounded-lg transition"
-                    >
-                      ← Previous
-                    </button>
-                    <div className="text-center">
-                      <h3 className="text-2xl font-bold text-gray-800">
-                        {calendarDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-                      </h3>
-                      <button
-                        onClick={goToToday}
-                        className="text-sm text-indigo-600 hover:text-indigo-700 mt-1"
-                      >
-                        Today
-                      </button>
-                    </div>
-                    <button
-                      onClick={() => changeMonth(1)}
-                      className="p-2 hover:bg-gray-100 rounded-lg transition"
-                    >
-                      Next →
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-7 gap-2">
-                    {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-                      <div key={day} className="text-center font-semibold text-gray-600 text-sm py-2">
-                        {day}
-                      </div>
-                    ))}
-                    
-                    {getDaysInMonth(calendarDate).map((date, idx) => {
-                      if (!date) {
-                        return <div key={`empty-${idx}`} className="aspect-square" />;
-                      }
-                      
-                      const dayBills = getBillsForDate(date);
-                      const isToday = date.toDateString() === new Date().toDateString();
-                      const hasUnpaidBills = dayBills.some(b => !b.paid);
-                      const hasPaidBills = dayBills.some(b => b.paid);
-                      
-                      return (
-                        <div
-                          key={idx}
-                          onClick={() => handleDayClick(date)}
-                          className={`aspect-square border rounded-lg p-2 transition cursor-pointer ${
-                            isToday ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 hover:border-indigo-300 hover:bg-gray-50'
-                          }`}
-                        >
-                          <div className="text-sm font-medium text-gray-700 mb-1">
-                            {date.getDate()}
-                          </div>
-                          {dayBills.length > 0 && (
-                            <div className="space-y-1">
-                              {dayBills.slice(0, 2).map(bill => {
-                                const status = calculateStatus(bill.dueDate, bill.paid);
-                                return (
-                                  <div
-                                    key={bill.id}
-                                    className={`text-xs px-1 py-0.5 rounded truncate ${
-                                      status === 'paid' ? 'bg-green-100 text-green-800' :
-                                      status === 'overdue' ? 'bg-red-100 text-red-800' :
-                                      status === 'due-soon' ? 'bg-yellow-100 text-yellow-800' :
-                                      'bg-blue-100 text-blue-800'
-                                    }`}
-                                    title={bill.vendor}
-                                  >
-                                    {bill.vendor}
-                                  </div>
-                                );
-                              })}
-                              {dayBills.length > 2 && (
-                                <div className="text-xs text-gray-600 px-1">
-                                  +{dayBills.length - 2} more
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div className="overflow-x-auto">
+              <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead className="bg-gray-50 border-b">
                     <tr>
@@ -1230,15 +799,14 @@
                       <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Vendor/Account</th>
                       <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Category</th>
                       <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Details</th>
-                      <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Credentials</th>
                       <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
                     {filteredBills.length === 0 ? (
                       <tr>
-                        <td colSpan="7" className="px-4 py-8 text-center text-gray-500">
-                          No items found. Add your first bill or account to get started!
+                        <td colSpan="6" className="px-4 py-8 text-center text-gray-500">
+                          No items found. Add your first bill or account!
                         </td>
                       </tr>
                     ) : (
@@ -1251,30 +819,22 @@
                               <span className={`px-2 py-1 rounded text-xs font-semibold ${
                                 isBill ? 'bg-purple-100 text-purple-700' : 'bg-teal-100 text-teal-700'
                               }`}>
-                                {isBill ? '📄 Bill' : '💰 Account'}
+                                {isBill ? '📄' : '💰'}
                               </span>
                             </td>
                             <td className="px-4 py-4">
                               {(isBill || bill.dueDate) && (
                                 <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(status)}`}>
-                                  {status === 'due-soon' ? 'Due Soon' : status.charAt(0).toUpperCase() + status.slice(1)}
+                                  {status === 'due-soon' ? 'Due Soon' : status?.charAt(0).toUpperCase() + status?.slice(1)}
                                 </span>
                               )}
                             </td>
                             <td className="px-4 py-4">
                               <div className="font-medium text-gray-800">{bill.vendor}</div>
                               {bill.notes && <div className="text-sm text-gray-500">{bill.notes}</div>}
-                              {bill.isRecurring && isBill && <div className="text-xs text-indigo-600 mt-1">🔄 Recurring</div>}
-                              {bill.isRecurring && !isBill && bill.amount && bill.dueDate && (
-                                <div className="text-xs text-indigo-600 mt-1">🔄 Recurring Payment</div>
-                              )}
-                              {!isBill && bill.accountType && (
-                                <div className="text-xs text-gray-600 mt-1 capitalize">{bill.accountType}</div>
-                              )}
                             </td>
                             <td className="px-4 py-4">
                               <span className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 rounded text-sm">
-                                <span>{bill.category === 'personal' ? '👤' : '🏢'}</span>
                                 {categoryNames[bill.category]}
                               </span>
                             </td>
@@ -1285,74 +845,21 @@
                                   <div className="font-semibold text-gray-800">${parseFloat(bill.amount).toFixed(2)}</div>
                                 </div>
                               ) : (
-                                <div className="space-y-1">
+                                <div>
                                   <div className="font-semibold text-gray-800">
                                     Balance: ${parseFloat(bill.balance || 0).toFixed(2)}
                                   </div>
-                                  {bill.interestRate && (
-                                    <div className="text-sm text-gray-600">
-                                      Interest: {bill.interestRate}%
-                                    </div>
-                                  )}
-                                  {bill.term && (
-                                    <div className="text-sm text-gray-600">
-                                      Term: {bill.term} months
-                                    </div>
-                                  )}
-                                  {bill.dueDate && bill.amount && (
-                                    <div className="text-sm text-gray-600">
-                                      Payment: ${parseFloat(bill.amount).toFixed(2)} on {formatDate(bill.dueDate)}
-                                    </div>
-                                  )}
                                 </div>
                               )}
-                            </td>
-                            <td className="px-4 py-4">
-                              <div className="space-y-1 text-sm">
-                                {bill.email && <div className="text-gray-600">Email: {bill.email}</div>}
-                                {bill.username && <div className="text-gray-600">User: {bill.username}</div>}
-                                {bill.password && (
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-gray-600">
-                                      Pass: {showPasswords[bill.id] ? bill.password : '••••••••'}
-                                    </span>
-                                    <button
-                                      onClick={() => togglePasswordVisibility(bill.id)}
-                                      className="text-indigo-600 hover:text-indigo-700"
-                                    >
-                                      {showPasswords[bill.id] ? '🙈' : '👁️'}
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
                             </td>
                             <td className="px-4 py-4">
                               <div className="flex gap-2">
                                 <button
                                   onClick={() => startEditingBill(bill)}
                                   className="p-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition"
-                                  title="Edit"
                                 >
                                   ✏️
                                 </button>
-                                {!isBill && (
-                                  <button
-                                    onClick={() => openBalanceUpdate(bill.id)}
-                                    className="p-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition"
-                                    title="Update balance"
-                                  >
-                                    💰
-                                  </button>
-                                )}
-                                {(bill.history && bill.history.length > 0) && (
-                                  <button
-                                    onClick={() => openHistory(bill)}
-                                    className="p-2 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 transition"
-                                    title="View history"
-                                  >
-                                    📜
-                                  </button>
-                                )}
                                 {(isBill || (bill.amount && bill.dueDate)) && (
                                   <button
                                     onClick={() => togglePaid(bill.id)}
@@ -1361,7 +868,6 @@
                                         ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' 
                                         : 'bg-green-100 text-green-700 hover:bg-green-200'
                                     }`}
-                                    title={bill.paid ? 'Mark as unpaid' : 'Mark as paid'}
                                   >
                                     ✓
                                   </button>
@@ -1369,7 +875,6 @@
                                 <button
                                   onClick={() => deleteBill(bill.id)}
                                   className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition"
-                                  title="Delete"
                                 >
                                   🗑️
                                 </button>
@@ -1382,8 +887,6 @@
                   </tbody>
                 </table>
               </div>
-                </>
-              )}
             </div>
           </main>
 
@@ -1393,54 +896,14 @@
                 <div className="p-6 border-b flex justify-between items-center">
                   <h2 className="text-2xl font-bold text-gray-800">Settings</h2>
                   <button
-                    onClick={() => {
-                      setShowSettings(false);
-                      setEditingCategory(null);
-                      setTempCategoryName('');
-                    }}
+                    onClick={() => setShowSettings(false)}
                     className="p-2 hover:bg-gray-100 rounded-lg transition text-2xl"
                   >
                     ✕
                   </button>
                 </div>
-                
-                <div className="p-6 border-b">
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <h3 className="text-lg font-semibold text-gray-800">My Profile</h3>
-                      <p className="text-sm text-gray-600">Manage your account information</p>
-                    </div>
-                    <button
-                      onClick={openProfileUpdate}
-                      className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition flex items-center gap-2"
-                    >
-                      <span>✏️</span>
-                      Edit Profile
-                    </button>
-                  </div>
-                  <div className="bg-gray-50 rounded-lg p-4 space-y-2">
-                    <div className="flex items-start gap-2">
-                      <span className="text-gray-600 text-sm font-medium w-24">Username:</span>
-                      <span className="text-gray-800 font-medium">{username}</span>
-                    </div>
-                    {fullName && (
-                      <div className="flex items-start gap-2">
-                        <span className="text-gray-600 text-sm font-medium w-24">Full Name:</span>
-                        <span className="text-gray-800">{fullName}</span>
-                      </div>
-                    )}
-                    {email && (
-                      <div className="flex items-start gap-2">
-                        <span className="text-gray-600 text-sm font-medium w-24">Email:</span>
-                        <span className="text-gray-800">{email}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                
                 <div className="p-6">
                   <h3 className="text-lg font-semibold text-gray-800 mb-4">Category Names</h3>
-                  <p className="text-sm text-gray-600 mb-4">Click the edit icon to rename your categories</p>
                   <div className="space-y-3">
                     {Object.keys(categoryNames).map(catKey => (
                       <div key={catKey} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
@@ -1450,17 +913,12 @@
                               type="text"
                               value={tempCategoryName}
                               onChange={(e) => setTempCategoryName(e.target.value)}
-                              onKeyPress={(e) => {
-                                if (e.key === 'Enter') saveCategoryName();
-                              }}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                              onKeyPress={(e) => e.key === 'Enter' && saveCategoryName()}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                               autoFocus
                             />
                           ) : (
-                            <div className="flex items-center gap-2">
-                              <span>{catKey === 'personal' ? '👤' : '🏢'}</span>
-                              <span className="font-medium text-gray-800">{categoryNames[catKey]}</span>
-                            </div>
+                            <span className="font-medium text-gray-800">{categoryNames[catKey]}</span>
                           )}
                         </div>
                         <div className="flex gap-2">
@@ -1468,13 +926,13 @@
                             <>
                               <button
                                 onClick={saveCategoryName}
-                                className="p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition"
+                                className="p-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200"
                               >
                                 ✓
                               </button>
                               <button
                                 onClick={cancelEditingCategory}
-                                className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition"
+                                className="p-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200"
                               >
                                 ✕
                               </button>
@@ -1482,7 +940,7 @@
                           ) : (
                             <button
                               onClick={() => startEditingCategory(catKey)}
-                              className="p-2 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition"
+                              className="p-2 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200"
                             >
                               ✏️
                             </button>
@@ -1494,11 +952,7 @@
                 </div>
                 <div className="p-6 border-t flex justify-end">
                   <button
-                    onClick={() => {
-                      setShowSettings(false);
-                      setEditingCategory(null);
-                      setTempCategoryName('');
-                    }}
+                    onClick={() => setShowSettings(false)}
                     className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
                   >
                     Done
@@ -1513,41 +967,33 @@
               <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
                 <div className="p-6 border-b flex justify-between items-center">
                   <h2 className="text-2xl font-bold text-gray-800">
-                    {editingBill 
-                      ? `Edit ${editingBill.type === 'account' ? 'Account' : 'Bill'}` 
-                      : `Add New ${newBill.type === 'account' ? 'Account' : 'Bill'}`
-                    }
+                    {editingBill ? 'Edit' : 'Add'} {newBill.type === 'account' ? 'Account' : 'Bill'}
                   </h2>
-                  <button
-                    onClick={cancelEdit}
-                    className="p-2 hover:bg-gray-100 rounded-lg transition text-2xl"
-                  >
+                  <button onClick={cancelEdit} className="p-2 hover:bg-gray-100 rounded-lg text-2xl">
                     ✕
                   </button>
                 </div>
                 <div className="p-6 space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Type *</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Type</label>
                     <div className="flex gap-4">
-                      <label className="flex items-center gap-2 cursor-pointer">
+                      <label className="flex items-center gap-2">
                         <input
                           type="radio"
                           value="bill"
                           checked={newBill.type === 'bill'}
                           onChange={(e) => setNewBill({...newBill, type: e.target.value})}
-                          className="w-4 h-4 text-indigo-600"
                         />
-                        <span className="text-sm font-medium text-gray-700">📄 Bill (scheduled payment)</span>
+                        <span>📄 Bill</span>
                       </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
+                      <label className="flex items-center gap-2">
                         <input
                           type="radio"
                           value="account"
                           checked={newBill.type === 'account'}
                           onChange={(e) => setNewBill({...newBill, type: e.target.value})}
-                          className="w-4 h-4 text-indigo-600"
                         />
-                        <span className="text-sm font-medium text-gray-700">💰 Account (balance tracking)</span>
+                        <span>💰 Account</span>
                       </label>
                     </div>
                   </div>
@@ -1555,22 +1001,21 @@
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        {newBill.type === 'bill' ? 'Vendor/Service' : 'Account Name'} *
+                        {newBill.type === 'bill' ? 'Vendor' : 'Account Name'} *
                       </label>
                       <input
                         type="text"
                         value={newBill.vendor}
                         onChange={(e) => setNewBill({...newBill, vendor: e.target.value})}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                        placeholder={newBill.type === 'bill' ? 'Netflix, Electric Company, etc.' : 'Mortgage, Credit Card, etc.'}
+                        className="w-full px-4 py-2 border rounded-lg"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Category *</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
                       <select
                         value={newBill.category}
                         onChange={(e) => setNewBill({...newBill, category: e.target.value})}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        className="w-full px-4 py-2 border rounded-lg"
                       >
                         <option value="personal">{categoryNames.personal}</option>
                         <option value="business1">{categoryNames.business1}</option>
@@ -1579,59 +1024,18 @@
                       </select>
                     </div>
                     
-                    {newBill.type === 'account' && (
-                      <>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Account Type</label>
-                          <select
-                            value={newBill.accountType}
-                            onChange={(e) => setNewBill({...newBill, accountType: e.target.value})}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                          >
-                            <option value="loan">Loan</option>
-                            <option value="mortgage">Mortgage</option>
-                            <option value="credit-card">Credit Card</option>
-                            <option value="savings">Savings Account</option>
-                            <option value="investment">Investment Account</option>
-                            <option value="other">Other</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Current Balance *</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={newBill.balance}
-                            onChange={(e) => setNewBill({...newBill, balance: e.target.value})}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                            placeholder="0.00"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Interest Rate (%)</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={newBill.interestRate}
-                            onChange={(e) => setNewBill({...newBill, interestRate: e.target.value})}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                            placeholder="5.5"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Term (months)</label>
-                          <input
-                            type="number"
-                            value={newBill.term}
-                            onChange={(e) => setNewBill({...newBill, term: e.target.value})}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                            placeholder="360"
-                          />
-                        </div>
-                      </>
-                    )}
-                    
-                    {newBill.type === 'bill' ? (
+                    {newBill.type === 'account' ? (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Balance *</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={newBill.balance}
+                          onChange={(e) => setNewBill({...newBill, balance: e.target.value})}
+                          className="w-full px-4 py-2 border rounded-lg"
+                        />
+                      </div>
+                    ) : (
                       <>
                         <div>
                           <label className="block text-sm font-medium text-gray-700 mb-2">Amount *</label>
@@ -1640,8 +1044,7 @@
                             step="0.01"
                             value={newBill.amount}
                             onChange={(e) => setNewBill({...newBill, amount: e.target.value})}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                            placeholder="0.00"
+                            className="w-full px-4 py-2 border rounded-lg"
                           />
                         </div>
                         <div>
@@ -1650,586 +1053,35 @@
                             type="date"
                             value={newBill.dueDate}
                             onChange={(e) => setNewBill({...newBill, dueDate: e.target.value})}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                            className="w-full px-4 py-2 border rounded-lg"
                           />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Frequency</label>
-                          <select
-                            value={newBill.frequency}
-                            onChange={(e) => setNewBill({...newBill, frequency: e.target.value})}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                          >
-                            <option value="weekly">Weekly</option>
-                            <option value="monthly">Monthly</option>
-                            <option value="quarterly">Quarterly</option>
-                            <option value="yearly">Yearly</option>
-                          </select>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Payment Amount (optional)</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={newBill.amount}
-                            onChange={(e) => setNewBill({...newBill, amount: e.target.value})}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                            placeholder="0.00"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Payment Due Date (optional)</label>
-                          <input
-                            type="date"
-                            value={newBill.dueDate}
-                            onChange={(e) => setNewBill({...newBill, dueDate: e.target.value})}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-2">Payment Frequency</label>
-                          <select
-                            value={newBill.frequency}
-                            onChange={(e) => setNewBill({...newBill, frequency: e.target.value})}
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                          >
-                            <option value="weekly">Weekly</option>
-                            <option value="monthly">Monthly</option>
-                            <option value="quarterly">Quarterly</option>
-                            <option value="yearly">Yearly</option>
-                          </select>
                         </div>
                       </>
                     )}
                     
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
-                      <input
-                        type="email"
-                        value={newBill.email}
-                        onChange={(e) => setNewBill({...newBill, email: e.target.value})}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                        placeholder="your@email.com"
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
+                      <textarea
+                        value={newBill.notes}
+                        onChange={(e) => setNewBill({...newBill, notes: e.target.value})}
+                        className="w-full px-4 py-2 border rounded-lg"
+                        rows="3"
                       />
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Username</label>
-                      <input
-                        type="text"
-                        value={newBill.username}
-                        onChange={(e) => setNewBill({...newBill, username: e.target.value})}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                        placeholder="account username"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
-                      <input
-                        type="password"
-                        value={newBill.password}
-                        onChange={(e) => setNewBill({...newBill, password: e.target.value})}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                        placeholder="account password"
-                      />
-                    </div>
-                  </div>
-                  
-                  {newBill.type === 'bill' && (
-                    <div>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={newBill.isRecurring}
-                          onChange={(e) => setNewBill({...newBill, isRecurring: e.target.checked})}
-                          className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-                        />
-                        <span className="text-sm font-medium text-gray-700">
-                          Recurring Bill (automatically create next bill when marked as paid)
-                        </span>
-                      </label>
-                    </div>
-                  )}
-                  
-                  {newBill.type === 'account' && newBill.amount && newBill.dueDate && (
-                    <div>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={newBill.isRecurring}
-                          onChange={(e) => setNewBill({...newBill, isRecurring: e.target.checked})}
-                          className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-                        />
-                        <span className="text-sm font-medium text-gray-700">
-                          Recurring Payment (automatically create next payment & reduce balance when marked as paid)
-                        </span>
-                      </label>
-                    </div>
-                  )}
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Notes</label>
-                    <textarea
-                      value={newBill.notes}
-                      onChange={(e) => setNewBill({...newBill, notes: e.target.value})}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                      rows="3"
-                      placeholder="Additional notes..."
-                    />
                   </div>
                 </div>
                 <div className="p-6 border-t flex gap-3 justify-end">
                   <button
                     onClick={cancelEdit}
-                    className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
+                    className="px-6 py-2 border rounded-lg hover:bg-gray-50"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={editingBill ? updateBill : addBill}
-                    className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
+                    className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
                   >
-                    {editingBill 
-                      ? `Update ${editingBill.type === 'account' ? 'Account' : 'Bill'}` 
-                      : `Add ${newBill.type === 'account' ? 'Account' : 'Bill'}`
-                    }
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {showBalanceUpdate && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-              <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
-                <div className="p-6 border-b">
-                  <h2 className="text-2xl font-bold text-gray-800">Update Balance</h2>
-                  <p className="text-sm text-gray-600 mt-2">Enter the new balance for this account</p>
-                </div>
-                <div className="p-6">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">New Balance *</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={newBalance}
-                    onChange={(e) => setNewBalance(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                    placeholder="0.00"
-                    autoFocus
-                  />
-                </div>
-                <div className="p-6 border-t flex gap-3 justify-end">
-                  <button
-                    onClick={() => {
-                      setShowBalanceUpdate(false);
-                      setBalanceUpdateId(null);
-                      setNewBalance('');
-                    }}
-                    className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={updateBalance}
-                    className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
-                  >
-                    Update Balance
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {showHistory && historyBill && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-              <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
-                <div className="p-6 border-b">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h2 className="text-2xl font-bold text-gray-800">Payment History</h2>
-                      <p className="text-sm text-gray-600 mt-1">{historyBill.vendor}</p>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setShowHistory(false);
-                        setHistoryBill(null);
-                      }}
-                      className="p-2 hover:bg-gray-100 rounded-lg transition text-2xl"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-                <div className="flex-1 overflow-y-auto p-6">
-                  {(!historyBill.history || historyBill.history.length === 0) ? (
-                    <div className="text-center py-8 text-gray-500">
-                      No payment history yet
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {[...historyBill.history].reverse().map((entry, idx) => {
-                        const date = new Date(entry.date);
-                        const isPayment = entry.type === 'payment';
-                        return (
-                          <div key={idx} className={`p-4 rounded-lg border-l-4 ${
-                            isPayment ? 'bg-green-50 border-green-500' : 'bg-blue-50 border-blue-500'
-                          }`}>
-                            <div className="flex justify-between items-start mb-2">
-                              <div className="flex items-center gap-2">
-                                <span className="text-2xl">{isPayment ? '💳' : '📊'}</span>
-                                <div>
-                                  <div className="font-semibold text-gray-800">
-                                    {isPayment ? 'Payment Made' : 'Balance Updated'}
-                                  </div>
-                                  <div className="text-sm text-gray-600">
-                                    {date.toLocaleDateString()} at {date.toLocaleTimeString()}
-                                  </div>
-                                </div>
-                              </div>
-                              {entry.amount && (
-                                <div className="text-right">
-                                  <div className="font-bold text-green-700">
-                                    -${parseFloat(entry.amount).toFixed(2)}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                            {entry.previousBalance && entry.newBalance && (
-                              <div className="flex items-center gap-2 text-sm mt-2 pt-2 border-t border-gray-200">
-                                <span className="text-gray-600">Balance:</span>
-                                <span className="font-medium text-gray-700">
-                                  ${parseFloat(entry.previousBalance).toFixed(2)}
-                                </span>
-                                <span className="text-gray-400">→</span>
-                                <span className="font-bold text-gray-800">
-                                  ${parseFloat(entry.newBalance).toFixed(2)}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-                <div className="p-6 border-t">
-                  <button
-                    onClick={() => {
-                      setShowHistory(false);
-                      setHistoryBill(null);
-                    }}
-                    className="w-full px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {selectedDayBills && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-              <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
-                <div className="p-6 border-b">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h2 className="text-2xl font-bold text-gray-800">
-                        Bills for {selectedDayBills.date.toLocaleDateString('en-US', { 
-                          weekday: 'long',
-                          month: 'long', 
-                          day: 'numeric',
-                          year: 'numeric'
-                        })}
-                      </h2>
-                      <p className="text-sm text-gray-600 mt-1">
-                        {selectedDayBills.bills.length} {selectedDayBills.bills.length === 1 ? 'bill' : 'bills'} due
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => setSelectedDayBills(null)}
-                      className="p-2 hover:bg-gray-100 rounded-lg transition text-2xl"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-                <div className="flex-1 overflow-y-auto p-6">
-                  <div className="space-y-3">
-                    {selectedDayBills.bills.map(bill => {
-                      const status = calculateStatus(bill.dueDate, bill.paid);
-                      const isBill = bill.type !== 'account';
-                      return (
-                        <div key={bill.id} className="border rounded-lg p-4 hover:border-indigo-300 transition">
-                          <div className="flex items-start justify-between mb-2">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className={`px-2 py-1 rounded text-xs font-semibold ${
-                                  isBill ? 'bg-purple-100 text-purple-700' : 'bg-teal-100 text-teal-700'
-                                }`}>
-                                  {isBill ? '📄' : '💰'}
-                                </span>
-                                <h3 className="font-bold text-gray-800">{bill.vendor}</h3>
-                              </div>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className={`px-2 py-1 rounded-full text-xs font-semibold border ${getStatusColor(status)}`}>
-                                  {status === 'due-soon' ? 'Due Soon' : status.charAt(0).toUpperCase() + status.slice(1)}
-                                </span>
-                                <span className="text-sm text-gray-600">
-                                  {categoryNames[bill.category]}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-2xl font-bold text-gray-800">
-                                ${parseFloat(bill.amount || 0).toFixed(2)}
-                              </div>
-                              {bill.type === 'account' && bill.balance && (
-                                <div className="text-sm text-gray-600">
-                                  Balance: ${parseFloat(bill.balance).toFixed(2)}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                          
-                          {bill.notes && (
-                            <div className="text-sm text-gray-600 mb-3">
-                              {bill.notes}
-                            </div>
-                          )}
-                          
-                          <div className="flex gap-2 pt-3 border-t">
-                            <button
-                              onClick={() => {
-                                setSelectedDayBills(null);
-                                startEditingBill(bill);
-                              }}
-                              className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition text-sm font-medium"
-                            >
-                              Edit
-                            </button>
-                            {!isBill && (
-                              <button
-                                onClick={() => {
-                                  setSelectedDayBills(null);
-                                  openBalanceUpdate(bill.id);
-                                }}
-                                className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition text-sm font-medium"
-                              >
-                                Update Balance
-                              </button>
-                            )}
-                            {(isBill || (bill.amount && bill.dueDate)) && (
-                              <button
-                                onClick={() => {
-                                  togglePaid(bill.id);
-                                  // Refresh the day bills
-                                  const updatedBills = getBillsForDate(selectedDayBills.date);
-                                  if (updatedBills.length > 0) {
-                                    setSelectedDayBills({ ...selectedDayBills, bills: updatedBills });
-                                  } else {
-                                    setSelectedDayBills(null);
-                                  }
-                                }}
-                                className={`px-3 py-1.5 rounded-lg transition text-sm font-medium ${
-                                  bill.paid 
-                                    ? 'bg-gray-100 text-gray-600 hover:bg-gray-200' 
-                                    : 'bg-green-100 text-green-700 hover:bg-green-200'
-                                }`}
-                              >
-                                {bill.paid ? 'Mark Unpaid' : 'Mark Paid'}
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-                <div className="p-6 border-t">
-                  <button
-                    onClick={() => setSelectedDayBills(null)}
-                    className="w-full px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {showProfileUpdate && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-              <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
-                <div className="p-6 border-b">
-                  <h2 className="text-2xl font-bold text-gray-800">Update Profile</h2>
-                  <p className="text-sm text-gray-600 mt-2">Update your account information</p>
-                </div>
-                <div className="p-6 space-y-4">
-                  {profileError && (
-                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2">
-                      <span className="text-red-600">⚠️</span>
-                      <p className="text-sm text-red-800">{profileError}</p>
-                    </div>
-                  )}
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Full Name</label>
-                    <input
-                      type="text"
-                      value={profileForm.fullName}
-                      onChange={(e) => setProfileForm({...profileForm, fullName: e.target.value})}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                      placeholder="John Doe"
-                    />
-                  </div>
-                  
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
-                    <input
-                      type="email"
-                      value={profileForm.email}
-                      onChange={(e) => setProfileForm({...profileForm, email: e.target.value})}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                      placeholder="john@example.com"
-                    />
-                  </div>
-                  
-                  <div className="pt-4 border-t">
-                    <h3 className="text-sm font-semibold text-gray-700 mb-3">Change Password (optional)</h3>
-                    
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Current Password</label>
-                        <input
-                          type="password"
-                          value={profileForm.currentPassword}
-                          onChange={(e) => setProfileForm({...profileForm, currentPassword: e.target.value})}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                          placeholder="Enter current password"
-                        />
-                      </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">New Password</label>
-                        <input
-                          type="password"
-                          value={profileForm.newPassword}
-                          onChange={(e) => setProfileForm({...profileForm, newPassword: e.target.value})}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                          placeholder="Minimum 6 characters"
-                        />
-                      </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Confirm New Password</label>
-                        <input
-                          type="password"
-                          value={profileForm.confirmNewPassword}
-                          onChange={(e) => setProfileForm({...profileForm, confirmNewPassword: e.target.value})}
-                          className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                          placeholder="Re-enter new password"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="p-6 border-t flex gap-3 justify-end">
-                  <button
-                    onClick={() => {
-                      setShowProfileUpdate(false);
-                      setProfileForm({
-                        fullName: '',
-                        email: '',
-                        currentPassword: '',
-                        newPassword: '',
-                        confirmNewPassword: ''
-                      });
-                      setProfileError('');
-                    }}
-                    className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={updateProfile}
-                    className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
-                  >
-                    Save Changes
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {showImportExport && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-              <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
-                <div className="p-6 border-b">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <h2 className="text-2xl font-bold text-gray-800">Backup & Restore</h2>
-                      <p className="text-sm text-gray-600 mt-1">Export or import your data</p>
-                    </div>
-                    <button
-                      onClick={() => setShowImportExport(false)}
-                      className="p-2 hover:bg-gray-100 rounded-lg transition text-2xl"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                </div>
-                <div className="p-6 space-y-4">
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <h3 className="font-semibold text-gray-800 mb-2">💾 Export Data</h3>
-                    <p className="text-sm text-gray-600 mb-3">
-                      Download all your bills, accounts, categories, and payment history as a backup file.
-                    </p>
-                    <button
-                      onClick={() => {
-                        exportData();
-                      }}
-                      className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium"
-                    >
-                      Download Backup File
-                    </button>
-                  </div>
-                  
-                  <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                    <h3 className="font-semibold text-gray-800 mb-2">📥 Import Data</h3>
-                    <p className="text-sm text-gray-600 mb-3">
-                      Restore your data from a previously exported backup file. This will replace your current data.
-                    </p>
-                    <label className="block">
-                      <input
-                        type="file"
-                        accept=".json"
-                        onChange={(e) => {
-                          importData(e);
-                          e.target.value = '';
-                        }}
-                        className="hidden"
-                        id="import-file-main"
-                      />
-                      <span className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-medium cursor-pointer inline-block text-center">
-                        Choose Backup File
-                      </span>
-                    </label>
-                  </div>
-                  
-                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                    <p className="text-xs text-yellow-800">
-                      <strong>💡 Tip:</strong> Export your data regularly to keep a backup! The file is safe to email to yourself or save to cloud storage.
-                    </p>
-                  </div>
-                </div>
-                <div className="p-6 border-t">
-                  <button
-                    onClick={() => setShowImportExport(false)}
-                    className="w-full px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
-                  >
-                    Close
+                    {editingBill ? 'Update' : 'Add'}
                   </button>
                 </div>
               </div>
